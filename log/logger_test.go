@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+
 	"golang.org/x/exp/slog"
 )
 
