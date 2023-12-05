@@ -8,7 +8,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/holiman/uint256"
-	"github.com/linxGnu/grocksdb"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -19,8 +18,7 @@ var (
 )
 
 const (
-	kvStoreName = "rocksdb"
-	sqliteName  = "shisui.sqlite"
+	sqliteName = "shisui.sqlite"
 )
 
 type Storage interface {
@@ -35,56 +33,43 @@ func getDistance(a *uint256.Int, b *uint256.Int) *uint256.Int {
 	return new(uint256.Int).Xor(a, b)
 }
 
-// opts := grocksdb.NewDefaultOptions()
-
-// opts.SetCreateIfMissing(true)
-
-// db, err := grocksdb.OpenDb(opts, "/path/to/db")
-
 type PortalStorage struct {
 	nodeId                 enode.ID
 	nodeDataDir            string
 	storageCapacityInBytes uint64
 	radius                 *uint256.Int
-	kv                     *grocksdb.DB
 	sqliteDB               *sql.DB
+	getStmt                *sql.Stmt
+	putStmt                *sql.Stmt
+	delStmt                *sql.Stmt
+	containStmt            *sql.Stmt
 }
 
-func NewPortalStorage(storageCapacityInMB uint64, nodeId enode.ID, nodeDataDir string) (*PortalStorage, error) {
-
-	opts := grocksdb.NewDefaultOptions()
-	opts.SetCreateIfMissing(true)
-
-	kv, err := grocksdb.OpenDb(opts, path.Join(nodeDataDir, kvStoreName))
-
-	if err != nil {
-		return nil, err
-	}
+func NewPortalStorage(storageCapacityInBytes uint64, nodeId enode.ID, nodeDataDir string) (*PortalStorage, error) {
 
 	sqlDb, err := sql.Open("sqlite3", path.Join(nodeDataDir, sqliteName))
 
 	if err != nil {
 		return nil, err
 	}
-
 	portalStorage := &PortalStorage{
 		nodeId:                 nodeId,
 		nodeDataDir:            nodeDataDir,
-		storageCapacityInBytes: storageCapacityInMB * 1000 * 1000,
+		storageCapacityInBytes: storageCapacityInBytes,
 		radius:                 maxDistance,
-		kv:                     kv,
 		sqliteDB:               sqlDb,
 	}
 
-	err = portalStorage.setupSql()
-
+	err = portalStorage.createTable()
 	if err != nil {
 		return nil, err
 	}
 
+	err = portalStorage.initStmts()
+
 	// Check whether we already have data, and use it to set radius
 
-	return portalStorage, nil
+	return portalStorage, err
 }
 
 func (p *PortalStorage) ContentId(contentKey []byte) []byte {
@@ -93,11 +78,30 @@ func (p *PortalStorage) ContentId(contentKey []byte) []byte {
 }
 
 func (p *PortalStorage) Get(contentKey []byte, contentId []byte) ([]byte, error) {
-	return p.kv.GetBytes(&grocksdb.ReadOptions{}, contentId)
+	var res []byte
+	err := p.getStmt.QueryRow().Scan(&res)
+	if err == sql.ErrNoRows {
+		return nil, ContentNotFound
+	}
+	return res, err
 }
 
-func (p *PortalStorage) setupSql() error {
-	stat, err := p.sqliteDB.Prepare(CREATE_QUERY)
+func (p *PortalStorage) Put(contentKey []byte, content []byte) error {
+	contentId := p.ContentId(contentKey)
+	_, err := p.putStmt.Exec(contentId, content)
+	return err
+}
+
+func (p *PortalStorage) Close() error {
+	p.getStmt.Close()
+	p.putStmt.Close()
+	p.delStmt.Close()
+	p.containStmt.Close()
+	return p.sqliteDB.Close()
+}
+
+func (p *PortalStorage) createTable() error {
+	stat, err := p.sqliteDB.Prepare(createSql)
 	if err != nil {
 		return err
 	}
@@ -106,57 +110,44 @@ func (p *PortalStorage) setupSql() error {
 	return err
 }
 
-func (p *PortalStorage) total_entry_count() (uint64, error) {
-	stat, err := p.sqliteDB.Prepare(TOTAL_ENTRY_COUNT_QUERY)
-	if err != nil {
-		return 0, err
+func (p *PortalStorage) initStmts() error {
+	var stat *sql.Stmt
+	var err error
+	if stat, err = p.sqliteDB.Prepare(getSql); err != nil {
+		return nil
 	}
-	defer stat.Close()
-	var total uint64
-	err = stat.QueryRow().Scan(&total)
-	return total, err
-}
-
-func (p *PortalStorage) capacityReached() (bool, error) {
-	storageUsage, err := p.getTotalStorageUsageInBytesFromNetwork()
-	return storageUsage > p.storageCapacityInBytes, err
-}
-
-// Internal method for measuring the total amount of requestable data that the node is storing.
-func (p *PortalStorage) getTotalStorageUsageInBytesFromNetwork() (uint64, error) {
-	stat, err := p.sqliteDB.Prepare(TOTAL_DATA_SIZE_QUERY)
-	if err != nil {
-		return 0, err
+	p.getStmt = stat
+	if stat, err = p.sqliteDB.Prepare(putSql); err != nil {
+		return nil
 	}
-	defer stat.Close()
-	var total uint64
-	err = stat.QueryRow().Scan(&total)
-	return total, err
+	p.putStmt = stat
+	if stat, err = p.sqliteDB.Prepare(deleteSql); err != nil {
+		return nil
+	}
+	p.delStmt = stat
+	if stat, err = p.sqliteDB.Prepare(containSql); err != nil {
+		return nil
+	}
+	p.containStmt = stat
+	return nil
 }
 
-// func (p *PortalStorage) findFarthestContentId() ([]byte, error) {
-// 	stat, err := p.sqliteDB.Prepare(XOR_FIND_FARTHEST_QUERY)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// }
+// get database size, content size and similar
+func (p *PortalStorage) Size() int64 {
+	return 0
+}
 
 // SQLite Statements
-const CREATE_QUERY = `CREATE TABLE IF NOT EXISTS content_metadata (
-	content_id_long TEXT PRIMARY KEY,
-	content_id_short INTEGER NOT NULL,
-	content_key TEXT NOT NULL,
-	content_size INTEGER
-);
-CREATE INDEX content_size_idx ON content_metadata(content_size);
-CREATE INDEX content_id_short_idx ON content_metadata(content_id_short);
-CREATE INDEX content_id_long_idx ON content_metadata(content_id_long);`
 
-const INSERT_QUERY = `INSERT OR IGNORE INTO content_metadata (content_id_long, content_id_short, content_key, content_size)
-VALUES (?1, ?2, ?3, ?4)`
-
-const DELETE_QUERY = `DELETE FROM content_metadata
-WHERE content_id_long = (?1)`
+const createSql = `CREATE TABLE IF NOT EXISTS kvstore (
+	key BLOB PRIMARY KEY,
+	value BLOB
+);`
+const getSql = "SELECT value FROM kvstore WHERE key = (?1);"
+const putSql = "INSERT OR REPLACE INTO kvstore (key, value) VALUES (?1, ?2);"
+const deleteSql = "DELETE FROM kvstore WHERE key = (?1);"
+const clearSql = "DELETE FROM kvstore"
+const containSql = "SELECT 1 FROM kvstore WHERE key = (?1);"
 
 const XOR_FIND_FARTHEST_QUERY = `SELECT
 		content_id_long
