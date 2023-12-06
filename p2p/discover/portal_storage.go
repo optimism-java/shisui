@@ -3,9 +3,13 @@ package discover
 import (
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"fmt"
+	"math/big"
 	"path"
+	"strings"
 
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/holiman/uint256"
 	_ "github.com/mattn/go-sqlite3"
@@ -19,6 +23,7 @@ var (
 
 const (
 	sqliteName = "shisui.sqlite"
+	contentDeletionFraction = 0.05 // 5% of the content will be deleted when the storage capacity is hit and radius gets adjusted.
 )
 
 type Storage interface {
@@ -43,6 +48,7 @@ type PortalStorage struct {
 	putStmt                *sql.Stmt
 	delStmt                *sql.Stmt
 	containStmt            *sql.Stmt
+	log            log.Logger
 }
 
 func NewPortalStorage(storageCapacityInBytes uint64, nodeId enode.ID, nodeDataDir string) (*PortalStorage, error) {
@@ -58,6 +64,7 @@ func NewPortalStorage(storageCapacityInBytes uint64, nodeId enode.ID, nodeDataDi
 		storageCapacityInBytes: storageCapacityInBytes,
 		radius:                 maxDistance,
 		sqliteDB:               sqlDb,
+		log:            log.New("protocol_storage", ""),
 	}
 
 	err = portalStorage.createTable()
@@ -88,8 +95,25 @@ func (p *PortalStorage) Get(contentKey []byte, contentId []byte) ([]byte, error)
 
 func (p *PortalStorage) Put(contentKey []byte, content []byte) error {
 	contentId := p.ContentId(contentKey)
+
 	_, err := p.putStmt.Exec(contentId, content)
-	return err
+	if err != nil {
+		return err
+	}
+
+	dbSize, err := p.UsedSize()
+	if err != nil {
+		return err
+	}
+	if dbSize > p.storageCapacityInBytes {
+		err = p.deleteContentFraction(contentDeletionFraction)
+		// 
+		if err != nil {
+			log.Warn("failed to delete")
+		}
+	}
+	
+	return nil
 }
 
 func (p *PortalStorage) Close() error {
@@ -133,8 +157,141 @@ func (p *PortalStorage) initStmts() error {
 }
 
 // get database size, content size and similar
-func (p *PortalStorage) Size() int64 {
-	return 0
+func (p *PortalStorage) Size() (uint64, error) {
+	sql := "SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size();"
+	stmt, err := p.sqliteDB.Prepare(sql)
+	if err != nil {
+		return 0, err
+	}
+	var res uint64
+	err = stmt.QueryRow().Scan(&res)
+	return res, err
+}
+
+func (p *PortalStorage) UnusedSize() (uint64, error) {
+	sql := "SELECT freelist_count * page_size as size FROM pragma_freelist_count(), pragma_page_size();"
+	return p.queryRowUint64(sql)
+}
+
+func (p *PortalStorage) UsedSize() (uint64, error) {
+	size, err := p.Size()
+	if err != nil {
+		return 0, err
+	}
+	unusedSize, err := p.UnusedSize()
+	if err != nil {
+		return 0, err
+	}
+	return size - unusedSize, err
+}
+
+func (p *PortalStorage) ContentSize() (uint64, error) {
+	sql := "SELECT COUNT(key) FROM kvstore;"
+	return p.queryRowUint64(sql)
+}
+
+func (p *PortalStorage) ContentCount() (uint64, error) {
+	sql := "SELECT SUM(length(value)) FROM kvstore"
+	return p.queryRowUint64(sql)
+}
+
+func (p *PortalStorage) queryRowUint64(sql string) (uint64, error) {
+	// sql := "SELECT SUM(length(value)) FROM kvstore"
+	stmt, err := p.sqliteDB.Prepare(sql)
+	if err != nil {
+		return 0, err
+	}
+	var res uint64
+	err = stmt.QueryRow().Scan(&res)
+	return res, err
+}
+
+func (p *PortalStorage) GetLargestDistance() (*uint256.Int, error) {
+	stmt, err := p.sqliteDB.Prepare(XOR_FIND_FARTHEST_QUERY)
+	if err != nil {
+		return nil, err
+	}
+	var contentId []byte
+
+	err = stmt.QueryRow(p.nodeId).Scan(&contentId)
+	if err != nil {
+		return nil, err
+	}
+	bugNum := new(big.Int).SetBytes(contentId)
+	res, _ := uint256.FromBig(bugNum)
+	return res, err
+}
+
+func (p *PortalStorage) EstimateNewRadius() (*uint256.Int, error) {
+	currrentSize, err := p.UsedSize()
+	if err != nil {
+		return nil, err
+	}
+	sizeRatio := currrentSize / p.storageCapacityInBytes
+	if sizeRatio > 0 {
+		bigFormat := new(big.Int).SetUint64(sizeRatio)
+		return new(uint256.Int).Div(p.radius, uint256.MustFromBig(bigFormat)), nil
+	}
+	return p.radius, nil
+}
+
+func (p *PortalStorage) deleteContentFraction(fraction float64) error {
+	if fraction <=0 || fraction >=1 {
+		return errors.New("fraction should be between 0 and 1")
+	}
+	totalContentSize, err := p.ContentSize()
+	if err != nil {
+		return err
+	}
+	bytesToDelete := uint64(fraction * float64(totalContentSize))
+	// deleteElements := 0
+	deleteBytes := 0
+
+	rows, err := p.sqliteDB.Query(getAllOrderedByDistanceSql, p.nodeId)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	idsToDelete := make([][]byte, 0)
+	for deleteBytes < int(bytesToDelete) {
+		var contentId []byte
+		var payloadLen int
+		err = rows.Scan(&contentId, &payloadLen)
+		if err != nil {
+			return err
+		}
+		idsToDelete = append(idsToDelete, contentId)
+		deleteBytes += payloadLen
+	}
+	err = p.deleteBatchById(idsToDelete...)
+	
+	return err
+}
+
+func (p *PortalStorage) deleteBatchById(ids ...[]byte) error {
+	// 构建带有占位符的 SQL 查询语句
+	query := "DELETE FROM kvstore WHERE id IN (?" + strings.Repeat(", ?", len(ids)-1) + ")"
+
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	// 执行删除操作
+	_, err := p.sqliteDB.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *PortalStorage) ReclaimSpace() error {
+	_, err := p.sqliteDB.Exec("VACUUM;")
+	return err
+}
+
+func (p *PortalStorage) DeleteContentOutOfRadius(radius uint256.Int) error {
+	_, err := p.sqliteDB.Exec(deleteOutOfRadiusStmt, p.nodeId, radius)
+	return err
 }
 
 // SQLite Statements
@@ -148,11 +305,13 @@ const putSql = "INSERT OR REPLACE INTO kvstore (key, value) VALUES (?1, ?2);"
 const deleteSql = "DELETE FROM kvstore WHERE key = (?1);"
 const clearSql = "DELETE FROM kvstore"
 const containSql = "SELECT 1 FROM kvstore WHERE key = (?1);"
+const getAllOrderedByDistanceSql = "SELECT key, length(value), ((?1 | key) - (?1 & key)) as distance FROM kvstore ORDER BY distance DESC;"
+const deleteOutOfRadiusStmt = "DELETE FROM kvstore WHERE ((?1 | key) - (?1 & key)) < ?2"
 
 const XOR_FIND_FARTHEST_QUERY = `SELECT
-		content_id_long
-		FROM content_metadata
-		ORDER BY ((?1 | content_id_short) - (?1 & content_id_short)) DESC`
+		((?1 | key) - (?1 & key)) as distance
+		FROM kvstore
+		ORDER BY distance DESC LIMIT 1`
 
 const CONTENT_KEY_LOOKUP_QUERY = "SELECT content_key FROM content_metadata WHERE content_id_long = (?1)"
 
