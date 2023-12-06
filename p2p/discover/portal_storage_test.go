@@ -1,37 +1,26 @@
 package discover
 
 import (
-	"database/sql"
+	"math"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 )
 
-func getDB() *sql.DB {
-	const createSql = `CREATE TABLE IF NOT EXISTS kvstore (
-		key BLOB PRIMARY KEY,
-		value BLOB
-	);`
-	sqlDb, _ := sql.Open("sqlite3", "test.db")
-	stat, _ :=sqlDb.Prepare(createSql)
-	defer stat.Close()
-	_, _ = stat.Exec()
-	return sqlDb
-}
+func TestBasicStorage(t *testing.T) {
+	zeroNodeId := uint256.NewInt(0).Bytes32()
+	storage, err := NewPortalStorage(math.MaxUint64, enode.ID(zeroNodeId), "./")
+	defer storage.Close()
+	assert.NoError(t, err)
 
-func BenchmarkPrepare(b *testing.B) {
-	const sql = "SELECT value FROM kvstore"
-	db := getDB()
-	b.ResetTimer()
-	for i:=0; i < b.N; i++ {
-		db.Exec(sql)
-	}
-}
+	contentKey := []byte("test")
+	content := []byte("value")
 
-func BenchmarkNoPrepare(b *testing.B) {
-	const sql = "SELECT value FROM kvstore"
-	db := getDB()
-	stmp, _ := db.Prepare(sql)
-	b.ResetTimer()
-	for i:=0; i < b.N; i++ {
-		stmp.Exec()
-	}
+	_, err = storage.Get(contentKey, storage.ContentId(contentKey))
+	assert.Equal(t, ContentNotFound, err)
+
+	err = storage.Put(contentKey, content)
+	assert.NoError(t, err)
 }

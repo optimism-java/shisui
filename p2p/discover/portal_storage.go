@@ -22,7 +22,7 @@ var (
 )
 
 const (
-	sqliteName = "shisui.sqlite"
+	sqliteName              = "shisui.sqlite"
 	contentDeletionFraction = 0.05 // 5% of the content will be deleted when the storage capacity is hit and radius gets adjusted.
 )
 
@@ -32,10 +32,6 @@ type Storage interface {
 	Get(contentKey []byte, contentId []byte) ([]byte, error)
 
 	Put(contentKey []byte, content []byte) error
-}
-
-func getDistance(a *uint256.Int, b *uint256.Int) *uint256.Int {
-	return new(uint256.Int).Xor(a, b)
 }
 
 type PortalStorage struct {
@@ -48,7 +44,7 @@ type PortalStorage struct {
 	putStmt                *sql.Stmt
 	delStmt                *sql.Stmt
 	containStmt            *sql.Stmt
-	log            log.Logger
+	log                    log.Logger
 }
 
 func NewPortalStorage(storageCapacityInBytes uint64, nodeId enode.ID, nodeDataDir string) (*PortalStorage, error) {
@@ -64,7 +60,7 @@ func NewPortalStorage(storageCapacityInBytes uint64, nodeId enode.ID, nodeDataDi
 		storageCapacityInBytes: storageCapacityInBytes,
 		radius:                 maxDistance,
 		sqliteDB:               sqlDb,
-		log:            log.New("protocol_storage", ""),
+		log:                    log.New("protocol_storage"),
 	}
 
 	err = portalStorage.createTable()
@@ -86,7 +82,7 @@ func (p *PortalStorage) ContentId(contentKey []byte) []byte {
 
 func (p *PortalStorage) Get(contentKey []byte, contentId []byte) ([]byte, error) {
 	var res []byte
-	err := p.getStmt.QueryRow().Scan(&res)
+	err := p.getStmt.QueryRow(contentId).Scan(&res)
 	if err == sql.ErrNoRows {
 		return nil, ContentNotFound
 	}
@@ -107,12 +103,12 @@ func (p *PortalStorage) Put(contentKey []byte, content []byte) error {
 	}
 	if dbSize > p.storageCapacityInBytes {
 		err = p.deleteContentFraction(contentDeletionFraction)
-		// 
+		//
 		if err != nil {
-			log.Warn("failed to delete")
+			log.Warn("failed to delete oversize item")
 		}
 	}
-	
+
 	return nil
 }
 
@@ -236,7 +232,7 @@ func (p *PortalStorage) EstimateNewRadius() (*uint256.Int, error) {
 }
 
 func (p *PortalStorage) deleteContentFraction(fraction float64) error {
-	if fraction <=0 || fraction >=1 {
+	if fraction <= 0 || fraction >= 1 {
 		return errors.New("fraction should be between 0 and 1")
 	}
 	totalContentSize, err := p.ContentSize()
@@ -264,7 +260,7 @@ func (p *PortalStorage) deleteContentFraction(fraction float64) error {
 		deleteBytes += payloadLen
 	}
 	err = p.deleteBatchById(idsToDelete...)
-	
+
 	return err
 }
 
