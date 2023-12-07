@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	"path"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/enode"
@@ -89,27 +88,53 @@ func (p *PortalStorage) Get(contentKey []byte, contentId []byte) ([]byte, error)
 	return res, err
 }
 
-func (p *PortalStorage) Put(contentKey []byte, content []byte) error {
+type PutResult struct {
+	err    error
+	pruned bool
+	count  int
+}
+
+func (p *PutResult) Err() error {
+	return p.err
+}
+
+func (p *PutResult) Pruned() bool {
+	return p.pruned
+}
+
+func (p *PutResult) PrunedCount() int {
+	return p.count
+}
+
+func newPutResultWithErr(err error) PutResult {
+	return PutResult{
+		err: err,
+	}
+}
+
+func (p *PortalStorage) Put(contentKey []byte, content []byte) PutResult {
 	contentId := p.ContentId(contentKey)
 
 	_, err := p.putStmt.Exec(contentId, content)
 	if err != nil {
-		return err
+		return newPutResultWithErr(err)
 	}
 
 	dbSize, err := p.UsedSize()
 	if err != nil {
-		return err
+		return newPutResultWithErr(err)
 	}
 	if dbSize > p.storageCapacityInBytes {
-		err = p.deleteContentFraction(contentDeletionFraction)
+		count, err := p.deleteContentFraction(contentDeletionFraction)
 		//
 		if err != nil {
 			log.Warn("failed to delete oversize item")
+			return newPutResultWithErr(err)
 		}
+		return PutResult{pruned: true, count: count}
 	}
 
-	return nil
+	return PutResult{}
 }
 
 func (p *PortalStorage) Close() error {
@@ -181,12 +206,12 @@ func (p *PortalStorage) UsedSize() (uint64, error) {
 	return size - unusedSize, err
 }
 
-func (p *PortalStorage) ContentSize() (uint64, error) {
+func (p *PortalStorage) ContentCount() (uint64, error) {
 	sql := "SELECT COUNT(key) FROM kvstore;"
 	return p.queryRowUint64(sql)
 }
 
-func (p *PortalStorage) ContentCount() (uint64, error) {
+func (p *PortalStorage) ContentSize() (uint64, error) {
 	sql := "SELECT SUM(length(value)) FROM kvstore"
 	return p.queryRowUint64(sql)
 }
@@ -218,7 +243,7 @@ func (p *PortalStorage) GetLargestDistance() (*uint256.Int, error) {
 	return res, err
 }
 
-func (p *PortalStorage) EstimateNewRadius() (*uint256.Int, error) {
+func (p *PortalStorage) EstimateNewRadius(currentRadius *uint256.Int) (*uint256.Int, error) {
 	currrentSize, err := p.UsedSize()
 	if err != nil {
 		return nil, err
@@ -226,58 +251,50 @@ func (p *PortalStorage) EstimateNewRadius() (*uint256.Int, error) {
 	sizeRatio := currrentSize / p.storageCapacityInBytes
 	if sizeRatio > 0 {
 		bigFormat := new(big.Int).SetUint64(sizeRatio)
-		return new(uint256.Int).Div(p.radius, uint256.MustFromBig(bigFormat)), nil
+		return new(uint256.Int).Div(currentRadius, uint256.MustFromBig(bigFormat)), nil
 	}
-	return p.radius, nil
+	return currentRadius, nil
 }
 
-func (p *PortalStorage) deleteContentFraction(fraction float64) error {
+func (p *PortalStorage) deleteContentFraction(fraction float64) (deleteCount int, err error) {
 	if fraction <= 0 || fraction >= 1 {
-		return errors.New("fraction should be between 0 and 1")
+		return deleteCount, errors.New("fraction should be between 0 and 1")
 	}
 	totalContentSize, err := p.ContentSize()
 	if err != nil {
-		return err
+		return deleteCount, err
 	}
 	bytesToDelete := uint64(fraction * float64(totalContentSize))
 	// deleteElements := 0
 	deleteBytes := 0
 
-	rows, err := p.sqliteDB.Query(getAllOrderedByDistanceSql, p.nodeId)
+	rows, err := p.sqliteDB.Query(getAllOrderedByDistanceSql, p.nodeId[:])
 	if err != nil {
-		return nil
+		return deleteCount, err
 	}
 	defer rows.Close()
-	idsToDelete := make([][]byte, 0)
-	for deleteBytes < int(bytesToDelete) {
+	for deleteBytes < int(bytesToDelete) && rows.Next() {
 		var contentId []byte
 		var payloadLen int
-		err = rows.Scan(&contentId, &payloadLen)
+		var distance []byte
+		err = rows.Scan(&contentId, &payloadLen, &distance)
 		if err != nil {
-			return err
+			return deleteCount, err
 		}
-		idsToDelete = append(idsToDelete, contentId)
+		err = p.del(contentId)
+		if err != nil {
+			return deleteCount, err
+		}
 		deleteBytes += payloadLen
+		deleteCount++
 	}
-	err = p.deleteBatchById(idsToDelete...)
 
-	return err
+	return
 }
 
-func (p *PortalStorage) deleteBatchById(ids ...[]byte) error {
-	// 构建带有占位符的 SQL 查询语句
-	query := "DELETE FROM kvstore WHERE id IN (?" + strings.Repeat(", ?", len(ids)-1) + ")"
-
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
-	// 执行删除操作
-	_, err := p.sqliteDB.Exec(query, args...)
-	if err != nil {
-		return err
-	}
-	return nil
+func (p *PortalStorage) del(contentId []byte) error {
+	_, err := p.delStmt.Exec(contentId)
+	return err
 }
 
 func (p *PortalStorage) ReclaimSpace() error {
@@ -285,9 +302,13 @@ func (p *PortalStorage) ReclaimSpace() error {
 	return err
 }
 
-func (p *PortalStorage) DeleteContentOutOfRadius(radius uint256.Int) error {
+func (p *PortalStorage) DeleteContentOutOfRadius(radius *uint256.Int) error {
 	_, err := p.sqliteDB.Exec(deleteOutOfRadiusStmt, p.nodeId, radius)
 	return err
+}
+
+func (p *PortalStorage) ForcePrune(radius *uint256.Int) {
+	p.DeleteContentOutOfRadius(radius)
 }
 
 // SQLite Statements
@@ -299,7 +320,8 @@ const createSql = `CREATE TABLE IF NOT EXISTS kvstore (
 const getSql = "SELECT value FROM kvstore WHERE key = (?1);"
 const putSql = "INSERT OR REPLACE INTO kvstore (key, value) VALUES (?1, ?2);"
 const deleteSql = "DELETE FROM kvstore WHERE key = (?1);"
-const clearSql = "DELETE FROM kvstore"
+
+// const clearSql = "DELETE FROM kvstore"
 const containSql = "SELECT 1 FROM kvstore WHERE key = (?1);"
 const getAllOrderedByDistanceSql = "SELECT key, length(value), ((?1 | key) - (?1 & key)) as distance FROM kvstore ORDER BY distance DESC;"
 const deleteOutOfRadiusStmt = "DELETE FROM kvstore WHERE ((?1 | key) - (?1 & key)) < ?2"
