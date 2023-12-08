@@ -135,26 +135,30 @@ func TestDBPruning(t *testing.T) {
 	thirdFurthest := uint256.NewInt(20)
 
 	numBytes := 10_000
-
-	pt1 := storage.Put(uint256.NewInt(1).Bytes(), genBytes(numBytes))
+	// test with private put method
+	pt1 := storage.put(uint256.NewInt(1).Bytes(), genBytes(numBytes))
 	assert.NoError(t, pt1.Err())
-	pt2 := storage.Put(thirdFurthest.Bytes(), genBytes(numBytes))
+	pt2 := storage.put(thirdFurthest.Bytes(), genBytes(numBytes))
 	assert.NoError(t, pt2.Err())
-	pt3 := storage.Put(uint256.NewInt(3).Bytes(), genBytes(numBytes))
+	pt3 := storage.put(uint256.NewInt(3).Bytes(), genBytes(numBytes))
 	assert.NoError(t, pt3.Err())
-	pt4 := storage.Put(uint256.NewInt(10).Bytes(), genBytes(numBytes))
+	pt4 := storage.put(uint256.NewInt(10).Bytes(), genBytes(numBytes))
 	assert.NoError(t, pt4.Err())
-	pt5 := storage.Put(uint256.NewInt(5).Bytes(), genBytes(numBytes))
+	pt5 := storage.put(uint256.NewInt(5).Bytes(), genBytes(numBytes))
 	assert.NoError(t, pt5.Err())
-	pt6 := storage.Put(uint256.NewInt(11).Bytes(), genBytes(numBytes))
+	pt6 := storage.put(uint256.NewInt(11).Bytes(), genBytes(numBytes))
 	assert.NoError(t, pt6.Err())
-	pt7 := storage.Put(furthestElement.Bytes(), genBytes(2000))
+	pt7 := storage.put(furthestElement.Bytes(), genBytes(4000))
 	assert.NoError(t, pt7.Err())
-	pt8 := storage.Put(secondFurthest.Bytes(), genBytes(2000))
+	pt8 := storage.put(secondFurthest.Bytes(), genBytes(3000))
 	assert.NoError(t, pt8.Err())
-	pt9 := storage.Put(uint256.NewInt(2).Bytes(), genBytes(numBytes))
+	pt9 := storage.put(uint256.NewInt(2).Bytes(), genBytes(numBytes))
 	assert.NoError(t, pt9.Err())
-	pt10 := storage.Put(uint256.NewInt(4).Bytes(), genBytes(12000))
+
+	res, _ := storage.GetLargestDistance()
+
+	assert.Equal(t, res, uint256.NewInt(40))
+	pt10 := storage.put(uint256.NewInt(4).Bytes(), genBytes(12000))
 	assert.NoError(t, pt10.Err())
 
 	assert.False(t, pt1.Pruned())
@@ -179,24 +183,80 @@ func TestDBPruning(t *testing.T) {
 	_, err = storage.Get(secondFurthest.Bytes(), storage.ContentId(secondFurthest.Bytes()))
 	assert.Equal(t, ContentNotFound, err)
 
-	val, err := storage.Get(thirdFurthest.Bytes(), storage.ContentId(thirdFurthest.Bytes()))
+	val, err := storage.Get(thirdFurthest.Bytes(), thirdFurthest.Bytes())
 	assert.NoError(t, err)
 	assert.NotNil(t, val)
 
 }
 
-// func TestForcePruning(t *testing.T) {
-// 	const startCap = uint64(14_159_872)
-// 	const endCapacity = uint64(500_000)
-// 	const amountOfItems = 10_000
+func TestGetLargestDistance(t *testing.T) {
+	storageCapacity := uint64(100_000)
 
-// 	nodeId := uint256.MustFromHex("0x30994892f3e4889d99deb5340050510d1842778acc7a7948adffa475fed51d6e").Bytes()
+	zeroNodeId := uint256.NewInt(0).Bytes32()
+	storage, err := NewPortalStorage(storageCapacity, enode.ID(zeroNodeId), nodeDataDir)
+	assert.NoError(t, err)
+	defer clear()
+	defer storage.Close()
 
-// 	storage, err := NewPortalStorage(startCap, enode.ID(nodeId), nodeDataDir)
-// 	assert.NoError(t, err)
+	furthestElement := uint256.NewInt(40)
+	secondFurthest := uint256.NewInt(30)
 
-// 	high := uint256.
+	pt7 := storage.put(furthestElement.Bytes(), genBytes(2000))
+	assert.NoError(t, pt7.Err())
 
-// 	increment := uint256.
+	val, err := storage.Get(furthestElement.Bytes(), furthestElement.Bytes())
+	assert.NoError(t, err)
+	assert.NotNil(t, val)
+	pt8 := storage.put(secondFurthest.Bytes(), genBytes(2000))
+	assert.NoError(t, pt8.Err())
+	res, err := storage.GetLargestDistance()
+	assert.NoError(t, err)
+	assert.Equal(t, furthestElement, res)
+}
 
-// }
+func TestForcePruning(t *testing.T) {
+	const startCap = uint64(14_159_872) // 100KB
+	const endCapacity = uint64(500_000) // 40KB
+	const amountOfItems = 10_000
+
+	maxUint256:= uint256.MustFromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+
+	nodeId := uint256.MustFromHex("0x30994892f3e4889d99deb5340050510d1842778acc7a7948adffa475fed51d6e").Bytes()
+	content := genBytes(1000)
+
+	storage, err := NewPortalStorage(startCap, enode.ID(nodeId), nodeDataDir)
+	assert.NoError(t, err)
+
+	increment := uint256.NewInt(0).Div(maxUint256, uint256.NewInt(amountOfItems))
+	remainder := uint256.NewInt(0).Mod(maxUint256, uint256.NewInt(amountOfItems))
+
+	id := uint256.NewInt(0)
+	putCount := 0
+	// id < maxUint256 - remainder
+	for id.Cmp(uint256.NewInt(0).Sub(maxUint256, remainder)) == -1 {
+		res := storage.put(id.Bytes(), content)
+		assert.NoError(t, res.Err())
+		id = id.Add(id, increment)
+		putCount++
+	}
+
+	storage.storageCapacityInBytes = endCapacity
+
+	oldDistance, err := storage.GetLargestDistance()
+	assert.NoError(t, err)
+	newDistance, err := storage.EstimateNewRadius(oldDistance)
+	assert.NoError(t, err)
+	assert.NotEqual(t, oldDistance.Cmp(newDistance), -1)
+	err = storage.ForcePrune(newDistance)
+	assert.NoError(t, err)
+
+	err = storage.ReclaimSpace()
+	assert.NoError(t, err)
+	size, err := storage.Size()
+	assert.NoError(t, err)
+
+	diff := math.Abs(float64(size - storage.storageCapacityInBytes))
+	// uint64(float64(storage.storageCapacityInBytes) * 0.2)
+	assert.True(t, diff < float64(storage.storageCapacityInBytes) * 0.3)
+
+}

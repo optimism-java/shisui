@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"math/big"
 	"path"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/holiman/uint256"
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
 )
 
 var (
@@ -46,9 +47,33 @@ type PortalStorage struct {
 	log                    log.Logger
 }
 
+func xor(contentId, nodeId []byte) []byte {
+	// length of contentId maybe not 32bytes
+	padding := make([]byte, 32) 
+	if len(contentId) != len(nodeId) {
+		copy(padding, contentId)
+	} else {
+		padding = contentId
+	}
+	res := make([]byte, len(padding))
+	for i, _ := range padding {
+		res[i] = padding[i] ^ nodeId[i]
+	}
+	return res
+}
+
 func NewPortalStorage(storageCapacityInBytes uint64, nodeId enode.ID, nodeDataDir string) (*PortalStorage, error) {
 
-	sqlDb, err := sql.Open("sqlite3", path.Join(nodeDataDir, sqliteName))
+	sql.Register("sqlite3_custom", &sqlite3.SQLiteDriver{
+		ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+			if err := conn.RegisterFunc("xor", xor, false); err != nil {
+				return err
+			}
+			return nil
+		},
+	})
+
+	sqlDb, err := sql.Open("sqlite3_custom", path.Join(nodeDataDir, sqliteName))
 
 	if err != nil {
 		return nil, err
@@ -87,7 +112,6 @@ func (p *PortalStorage) Get(contentKey []byte, contentId []byte) ([]byte, error)
 	}
 	return res, err
 }
-
 type PutResult struct {
 	err    error
 	pruned bool
@@ -113,8 +137,10 @@ func newPutResultWithErr(err error) PutResult {
 }
 
 func (p *PortalStorage) Put(contentKey []byte, content []byte) PutResult {
-	contentId := p.ContentId(contentKey)
+	return p.put(p.ContentId(contentKey), content)
+}
 
+func (p *PortalStorage) put(contentId []byte, content []byte) PutResult {
 	_, err := p.putStmt.Exec(contentId, content)
 	if err != nil {
 		return newPutResultWithErr(err)
@@ -232,15 +258,20 @@ func (p *PortalStorage) GetLargestDistance() (*uint256.Int, error) {
 	if err != nil {
 		return nil, err
 	}
-	var contentId []byte
+	var distance []byte
 
-	err = stmt.QueryRow(p.nodeId).Scan(&contentId)
+	err = stmt.QueryRow(p.nodeId[:]).Scan(&distance)
 	if err != nil {
 		return nil, err
 	}
-	bugNum := new(big.Int).SetBytes(contentId)
-	res, _ := uint256.FromBig(bugNum)
-	return res, err
+	// reverse the distance, because big.SetBytes is big-endian
+	reverseBytes(distance)
+	// for i:= 0; i < len(distance) / 2; i++ {
+	// 	distance[i], distance[len(distance) - i - 1] = distance[len(distance) - i - 1], distance[i]
+	// }
+	bigNum := new(big.Int).SetBytes(distance)
+	res := uint256.MustFromBig(bigNum)
+	return res, nil
 }
 
 func (p *PortalStorage) EstimateNewRadius(currentRadius *uint256.Int) (*uint256.Int, error) {
@@ -273,6 +304,7 @@ func (p *PortalStorage) deleteContentFraction(fraction float64) (deleteCount int
 		return deleteCount, err
 	}
 	defer rows.Close()
+	idsToDelete := make([][]byte, 0)
 	for deleteBytes < int(bytesToDelete) && rows.Next() {
 		var contentId []byte
 		var payloadLen int
@@ -281,14 +313,18 @@ func (p *PortalStorage) deleteContentFraction(fraction float64) (deleteCount int
 		if err != nil {
 			return deleteCount, err
 		}
-		err = p.del(contentId)
+		idsToDelete = append(idsToDelete, contentId)
+		// err = p.del(contentId)
 		if err != nil {
 			return deleteCount, err
 		}
 		deleteBytes += payloadLen
 		deleteCount++
 	}
-
+	// row must close first, or database is locked
+	// rows.Close() can call multi times
+	rows.Close()
+	err = p.batchDel(idsToDelete)
 	return
 }
 
@@ -297,18 +333,38 @@ func (p *PortalStorage) del(contentId []byte) error {
 	return err
 }
 
+func (p *PortalStorage) batchDel(ids [][]byte) error {
+	query := "DELETE FROM kvstore WHERE key IN (?" + strings.Repeat(", ?", len(ids)-1) + ")"
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+
+	// 执行删除操作
+	_, err := p.sqliteDB.Exec(query, args...)
+	return err
+}
+
 func (p *PortalStorage) ReclaimSpace() error {
 	_, err := p.sqliteDB.Exec("VACUUM;")
 	return err
 }
 
-func (p *PortalStorage) DeleteContentOutOfRadius(radius *uint256.Int) error {
-	_, err := p.sqliteDB.Exec(deleteOutOfRadiusStmt, p.nodeId, radius)
+func (p *PortalStorage) deleteContentOutOfRadius(radius *uint256.Int) error {
+	res, err := p.sqliteDB.Exec(deleteOutOfRadiusStmt, p.nodeId[:], radius)
+	count, _ :=  res.RowsAffected()
+	p.log.Trace("delete %d items",count)
 	return err
 }
 
-func (p *PortalStorage) ForcePrune(radius *uint256.Int) {
-	p.DeleteContentOutOfRadius(radius)
+func (p *PortalStorage) ForcePrune(radius *uint256.Int) error {
+	return p.deleteContentOutOfRadius(radius)
+}
+
+func reverseBytes(src []byte) {
+	for i:= 0; i < len(src) / 2; i++ {
+		src[i], src[len(src) - i - 1] = src[len(src) - i - 1], src[i]
+	}
 }
 
 // SQLite Statements
@@ -323,20 +379,11 @@ const deleteSql = "DELETE FROM kvstore WHERE key = (?1);"
 
 // const clearSql = "DELETE FROM kvstore"
 const containSql = "SELECT 1 FROM kvstore WHERE key = (?1);"
-const getAllOrderedByDistanceSql = "SELECT key, length(value), ((?1 | key) - (?1 & key)) as distance FROM kvstore ORDER BY distance DESC;"
-const deleteOutOfRadiusStmt = "DELETE FROM kvstore WHERE ((?1 | key) - (?1 & key)) < ?2"
+const getAllOrderedByDistanceSql = "SELECT key, length(value), xor(key, (?1)) as distance FROM kvstore ORDER BY distance DESC;"
+const deleteOutOfRadiusStmt = "DELETE FROM kvstore WHERE xor(key, (?1)) < ?2"
 
 const XOR_FIND_FARTHEST_QUERY = `SELECT
-		((?1 | key) - (?1 & key)) as distance
+		xor(key, (?1)) as distance
 		FROM kvstore
-		ORDER BY distance DESC LIMIT 1`
+		ORDER BY distance DESC`
 
-const CONTENT_KEY_LOOKUP_QUERY = "SELECT content_key FROM content_metadata WHERE content_id_long = (?1)"
-
-const TOTAL_DATA_SIZE_QUERY = "SELECT TOTAL(content_size) FROM content_metadata"
-
-const TOTAL_ENTRY_COUNT_QUERY = "SELECT COUNT(content_id_long) FROM content_metadata"
-
-const PAGINATE_QUERY = "SELECT content_key FROM content_metadata ORDER BY content_key LIMIT :limit OFFSET :offset"
-
-const CONTENT_SIZE_LOOKUP_QUERY = "SELECT content_size FROM content_metadata WHERE content_id_long = (?1)"
