@@ -214,18 +214,58 @@ func TestGetLargestDistance(t *testing.T) {
 	assert.Equal(t, furthestElement, res)
 }
 
+func TestSimpleForcePruning(t *testing.T) {
+	storageCapacity := uint64(100_000)
+
+	zeroNodeId := uint256.NewInt(0).Bytes32()
+	storage, err := NewPortalStorage(storageCapacity, enode.ID(zeroNodeId), nodeDataDir)
+	assert.NoError(t, err)
+	defer clear()
+	defer storage.Close()
+
+	furthestElement := uint256.NewInt(40)
+	secondFurthest := uint256.NewInt(30)
+	third := uint256.NewInt(10)
+
+	pt1 := storage.put(furthestElement.Bytes(), genBytes(2000))
+	assert.NoError(t, pt1.Err())
+
+	pt2 := storage.put(secondFurthest.Bytes(), genBytes(2000))
+	assert.NoError(t, pt2.Err())
+
+	pt3 := storage.put(third.Bytes(), genBytes(2000))
+	assert.NoError(t, pt3.Err())
+	res, err := storage.GetLargestDistance()
+	assert.NoError(t, err)
+	assert.Equal(t, furthestElement, res)
+
+	err = storage.ForcePrune(uint256.NewInt(20))
+	assert.NoError(t, err)
+
+	_, err = storage.Get(furthestElement.Bytes(), furthestElement.Bytes())
+	assert.Equal(t, ContentNotFound, err)
+
+	_, err = storage.Get(secondFurthest.Bytes(), secondFurthest.Bytes())
+	assert.Equal(t, ContentNotFound, err)
+
+	_, err = storage.Get(third.Bytes(), third.Bytes())
+	assert.NoError(t, err)
+}
+
 func TestForcePruning(t *testing.T) {
-	const startCap = uint64(14_159_872) // 100KB
-	const endCapacity = uint64(500_000) // 40KB
+	const startCap = uint64(14_159_872)
+	const endCapacity = uint64(5000_000)
 	const amountOfItems = 10_000
 
-	maxUint256:= uint256.MustFromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	maxUint256 := uint256.MustFromHex("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 
 	nodeId := uint256.MustFromHex("0x30994892f3e4889d99deb5340050510d1842778acc7a7948adffa475fed51d6e").Bytes()
 	content := genBytes(1000)
 
 	storage, err := NewPortalStorage(startCap, enode.ID(nodeId), nodeDataDir)
 	assert.NoError(t, err)
+	defer clear()
+	defer storage.Close()
 
 	increment := uint256.NewInt(0).Div(maxUint256, uint256.NewInt(amountOfItems))
 	remainder := uint256.NewInt(0).Mod(maxUint256, uint256.NewInt(amountOfItems))
@@ -250,13 +290,8 @@ func TestForcePruning(t *testing.T) {
 	err = storage.ForcePrune(newDistance)
 	assert.NoError(t, err)
 
-	err = storage.ReclaimSpace()
+	var total int64
+	err = storage.sqliteDB.QueryRow("SELECT count(*) FROM kvstore where greater(xor(key, (?1)), (?2)) = 1", storage.nodeId[:], newDistance.Bytes()).Scan(&total)
 	assert.NoError(t, err)
-	size, err := storage.Size()
-	assert.NoError(t, err)
-
-	diff := math.Abs(float64(size - storage.storageCapacityInBytes))
-	// uint64(float64(storage.storageCapacityInBytes) * 0.2)
-	assert.True(t, diff < float64(storage.storageCapacityInBytes) * 0.3)
-
+	assert.Equal(t, int64(0), total)
 }

@@ -1,6 +1,7 @@
 package discover
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"database/sql"
 	"errors"
@@ -49,7 +50,7 @@ type PortalStorage struct {
 
 func xor(contentId, nodeId []byte) []byte {
 	// length of contentId maybe not 32bytes
-	padding := make([]byte, 32) 
+	padding := make([]byte, 32)
 	if len(contentId) != len(nodeId) {
 		copy(padding, contentId)
 	} else {
@@ -62,11 +63,19 @@ func xor(contentId, nodeId []byte) []byte {
 	return res
 }
 
+// a > b return 1; else return 0
+func greater(a, b []byte) int {
+	return bytes.Compare(a, b)
+}
+
 func NewPortalStorage(storageCapacityInBytes uint64, nodeId enode.ID, nodeDataDir string) (*PortalStorage, error) {
 
 	sql.Register("sqlite3_custom", &sqlite3.SQLiteDriver{
 		ConnectHook: func(conn *sqlite3.SQLiteConn) error {
 			if err := conn.RegisterFunc("xor", xor, false); err != nil {
+				return err
+			}
+			if err := conn.RegisterFunc("greater", greater, false); err != nil {
 				return err
 			}
 			return nil
@@ -112,6 +121,7 @@ func (p *PortalStorage) Get(contentKey []byte, contentId []byte) ([]byte, error)
 	}
 	return res, err
 }
+
 type PutResult struct {
 	err    error
 	pruned bool
@@ -351,9 +361,9 @@ func (p *PortalStorage) ReclaimSpace() error {
 }
 
 func (p *PortalStorage) deleteContentOutOfRadius(radius *uint256.Int) error {
-	res, err := p.sqliteDB.Exec(deleteOutOfRadiusStmt, p.nodeId[:], radius)
-	count, _ :=  res.RowsAffected()
-	p.log.Trace("delete %d items",count)
+	res, err := p.sqliteDB.Exec(deleteOutOfRadiusStmt, p.nodeId[:], radius.Bytes())
+	count, _ := res.RowsAffected()
+	p.log.Trace("delete %d items", count)
 	return err
 }
 
@@ -362,8 +372,8 @@ func (p *PortalStorage) ForcePrune(radius *uint256.Int) error {
 }
 
 func reverseBytes(src []byte) {
-	for i:= 0; i < len(src) / 2; i++ {
-		src[i], src[len(src) - i - 1] = src[len(src) - i - 1], src[i]
+	for i := 0; i < len(src)/2; i++ {
+		src[i], src[len(src)-i-1] = src[len(src)-i-1], src[i]
 	}
 }
 
@@ -380,10 +390,9 @@ const deleteSql = "DELETE FROM kvstore WHERE key = (?1);"
 // const clearSql = "DELETE FROM kvstore"
 const containSql = "SELECT 1 FROM kvstore WHERE key = (?1);"
 const getAllOrderedByDistanceSql = "SELECT key, length(value), xor(key, (?1)) as distance FROM kvstore ORDER BY distance DESC;"
-const deleteOutOfRadiusStmt = "DELETE FROM kvstore WHERE xor(key, (?1)) < ?2"
+const deleteOutOfRadiusStmt = "DELETE FROM kvstore WHERE greater(xor(key, (?1)), (?2)) = 1"
 
 const XOR_FIND_FARTHEST_QUERY = `SELECT
 		xor(key, (?1)) as distance
 		FROM kvstore
 		ORDER BY distance DESC`
-
