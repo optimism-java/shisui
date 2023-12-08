@@ -57,7 +57,7 @@ func xor(contentId, nodeId []byte) []byte {
 		padding = contentId
 	}
 	res := make([]byte, len(padding))
-	for i, _ := range padding {
+	for i := range padding {
 		res[i] = padding[i] ^ nodeId[i]
 	}
 	return res
@@ -69,18 +69,27 @@ func greater(a, b []byte) int {
 }
 
 func NewPortalStorage(storageCapacityInBytes uint64, nodeId enode.ID, nodeDataDir string) (*PortalStorage, error) {
-
-	sql.Register("sqlite3_custom", &sqlite3.SQLiteDriver{
-		ConnectHook: func(conn *sqlite3.SQLiteConn) error {
-			if err := conn.RegisterFunc("xor", xor, false); err != nil {
-				return err
-			}
-			if err := conn.RegisterFunc("greater", greater, false); err != nil {
-				return err
-			}
-			return nil
-		},
-	})
+	// avoid repeated register in tests
+	registered := false
+	drives := sql.Drivers()
+	for _, v := range drives {
+		if v == "sqlite3_custom" {
+			registered = true
+		}
+	}
+	if !registered {
+		sql.Register("sqlite3_custom", &sqlite3.SQLiteDriver{
+			ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+				if err := conn.RegisterFunc("xor", xor, false); err != nil {
+					return err
+				}
+				if err := conn.RegisterFunc("greater", greater, false); err != nil {
+					return err
+				}
+				return nil
+			},
+		})
+	}
 
 	sqlDb, err := sql.Open("sqlite3_custom", path.Join(nodeDataDir, sqliteName))
 

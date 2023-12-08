@@ -118,7 +118,6 @@ func TestDBSize(t *testing.T) {
 
 	assert.Equal(t, size1, size6)
 	assert.Equal(t, usedSize2, size6)
-
 }
 
 func TestDBPruning(t *testing.T) {
@@ -186,7 +185,6 @@ func TestDBPruning(t *testing.T) {
 	val, err := storage.Get(thirdFurthest.Bytes(), thirdFurthest.Bytes())
 	assert.NoError(t, err)
 	assert.NotNil(t, val)
-
 }
 
 func TestGetLargestDistance(t *testing.T) {
