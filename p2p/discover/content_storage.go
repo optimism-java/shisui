@@ -2,7 +2,6 @@ package discover
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -25,14 +24,27 @@ var (
 const (
 	sqliteName              = "shisui.sqlite"
 	contentDeletionFraction = 0.05 // 5% of the content will be deleted when the storage capacity is hit and radius gets adjusted.
+	// SQLite Statements
+	createSql = `CREATE TABLE IF NOT EXISTS kvstore (
+		key BLOB PRIMARY KEY,
+		value BLOB
+	);`
+	getSql                     = "SELECT value FROM kvstore WHERE key = (?1);"
+	putSql                     = "INSERT OR REPLACE INTO kvstore (key, value) VALUES (?1, ?2);"
+	deleteSql                  = "DELETE FROM kvstore WHERE key = (?1);"
+	containSql                 = "SELECT 1 FROM kvstore WHERE key = (?1);"
+	getAllOrderedByDistanceSql = "SELECT key, length(value), xor(key, (?1)) as distance FROM kvstore ORDER BY distance DESC;"
+	deleteOutOfRadiusStmt      = "DELETE FROM kvstore WHERE greater(xor(key, (?1)), (?2)) = 1"
+	XOR_FIND_FARTHEST_QUERY    = `SELECT
+		xor(key, (?1)) as distance
+		FROM kvstore
+		ORDER BY distance DESC`
 )
 
 type Storage interface {
-	ContentId(contentKey []byte) []byte
+	Get(contentId []byte) ([]byte, error)
 
-	Get(contentKey []byte, contentId []byte) ([]byte, error)
-
-	Put(contentKey []byte, content []byte) error
+	Put(contentId []byte, content []byte) error
 }
 
 type PortalStorage struct {
@@ -117,12 +129,7 @@ func NewPortalStorage(storageCapacityInBytes uint64, nodeId enode.ID, nodeDataDi
 	return portalStorage, err
 }
 
-func (p *PortalStorage) ContentId(contentKey []byte) []byte {
-	digest := sha256.Sum256(contentKey)
-	return digest[:]
-}
-
-func (p *PortalStorage) Get(contentKey []byte, contentId []byte) ([]byte, error) {
+func (p *PortalStorage) Get(contentId []byte) ([]byte, error) {
 	var res []byte
 	err := p.getStmt.QueryRow(contentId).Scan(&res)
 	if err == sql.ErrNoRows {
@@ -155,11 +162,7 @@ func newPutResultWithErr(err error) PutResult {
 	}
 }
 
-func (p *PortalStorage) Put(contentKey []byte, content []byte) PutResult {
-	return p.put(p.ContentId(contentKey), content)
-}
-
-func (p *PortalStorage) put(contentId []byte, content []byte) PutResult {
+func (p *PortalStorage) Put(contentId []byte, content []byte) PutResult {
 	_, err := p.putStmt.Exec(contentId, content)
 	if err != nil {
 		return newPutResultWithErr(err)
@@ -285,9 +288,6 @@ func (p *PortalStorage) GetLargestDistance() (*uint256.Int, error) {
 	}
 	// reverse the distance, because big.SetBytes is big-endian
 	reverseBytes(distance)
-	// for i:= 0; i < len(distance) / 2; i++ {
-	// 	distance[i], distance[len(distance) - i - 1] = distance[len(distance) - i - 1], distance[i]
-	// }
 	bigNum := new(big.Int).SetBytes(distance)
 	res := uint256.MustFromBig(bigNum)
 	return res, nil
@@ -385,23 +385,3 @@ func reverseBytes(src []byte) {
 		src[i], src[len(src)-i-1] = src[len(src)-i-1], src[i]
 	}
 }
-
-// SQLite Statements
-
-const createSql = `CREATE TABLE IF NOT EXISTS kvstore (
-	key BLOB PRIMARY KEY,
-	value BLOB
-);`
-const getSql = "SELECT value FROM kvstore WHERE key = (?1);"
-const putSql = "INSERT OR REPLACE INTO kvstore (key, value) VALUES (?1, ?2);"
-const deleteSql = "DELETE FROM kvstore WHERE key = (?1);"
-
-// const clearSql = "DELETE FROM kvstore"
-const containSql = "SELECT 1 FROM kvstore WHERE key = (?1);"
-const getAllOrderedByDistanceSql = "SELECT key, length(value), xor(key, (?1)) as distance FROM kvstore ORDER BY distance DESC;"
-const deleteOutOfRadiusStmt = "DELETE FROM kvstore WHERE greater(xor(key, (?1)), (?2)) = 1"
-
-const XOR_FIND_FARTHEST_QUERY = `SELECT
-		xor(key, (?1)) as distance
-		FROM kvstore
-		ORDER BY distance DESC`
