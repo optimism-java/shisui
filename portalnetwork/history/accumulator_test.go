@@ -112,11 +112,16 @@ func parseHeaderWithProof() ([]BlockHeaderWithProof, error) {
 	return res, nil
 }
 
+func getEpochAccuBytes(name string) ([]byte, error) {
+	epochData, err := os.ReadFile(fmt.Sprintf("./testdata/%s.bin", name))
+	return epochData, err
+}
+
 func getEpochAccu(name string) (EpochAccumulator, error) {
 	epochAccu := EpochAccumulator{
 		HeaderRecords: make([][]byte, 0),
 	}
-	epochData, err := os.ReadFile(fmt.Sprintf("./testdata/%s.bin", name))
+	epochData, err := getEpochAccuBytes(name)
 	if err != nil {
 		return epochAccu, err
 	}

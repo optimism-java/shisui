@@ -47,6 +47,10 @@ type MasterAccumulator struct {
 	HistoricalEpochs [][]byte `ssz-max:"1897,32" ssz-size:"?,32"`
 }
 
+type PortalReceipts struct {
+	Receipts [][]byte `ssz-max:"16384,134217728"`
+}
+
 // BlockHeaderProof is a ssz union type
 // Union[None, AccumulatorProof]
 type BlockHeaderProof struct {

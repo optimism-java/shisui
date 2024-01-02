@@ -470,7 +470,7 @@ func (p *PortalProtocol) processOffer(target *enode.Node, resp []byte, request *
 				} else {
 					for _, index := range contentKeyBitlist.BitIndices() {
 						contentKey := request.Request.(*PersistOfferRequest).ContentKeys[index]
-						contentId := p.toContentId(contentKey)
+						contentId := p.ToContentId(contentKey)
 						if contentId != nil {
 							content, err = p.storage.Get(contentId)
 							if err != nil {
@@ -853,7 +853,7 @@ func (p *PortalProtocol) handleFindContent(id enode.ID, addr *net.UDPAddr, reque
 	enrOverhead := 4 //per added ENR, 4 bytes offset overhead
 	var err error
 
-	contentId := p.toContentId(request.ContentKey)
+	contentId := p.ToContentId(request.ContentKey)
 	if contentId == nil {
 		return nil, ErrNilContentKey
 	}
@@ -1023,7 +1023,7 @@ func (p *PortalProtocol) handleOffer(id enode.ID, addr *net.UDPAddr, request *po
 
 	contentKeys := make([][]byte, 0)
 	for i, contentKey := range request.ContentKeys {
-		contentId := p.toContentId(contentKey)
+		contentId := p.ToContentId(contentKey)
 		if contentId != nil {
 			if inRange(p.Self().ID(), p.nodeRadius, contentId) {
 				if _, err = p.storage.Get(contentId); err != nil {
@@ -1355,6 +1355,7 @@ func (p *PortalProtocol) ContentLookup(contentKey []byte) ([]byte, error) {
 	lookupContext, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	resChan := make(chan []byte, 1)
+	defer close(resChan)
 
 	newLookup(lookupContext, p.table, p.Self().ID(), func(n *node) ([]*node, error) {
 		return p.contentLookupWorker(unwrapNode(n), contentKey, resChan)
@@ -1388,6 +1389,26 @@ func (p *PortalProtocol) contentLookupWorker(n *enode.Node, contentKey []byte, r
 		return wrapNodes(nodes), nil
 	}
 	return wrapedNode, nil
+}
+
+func (p *PortalProtocol) ToContentId(contentKey []byte) []byte {
+	return p.toContentId(contentKey)
+}
+
+func (p *PortalProtocol) InRange(contentId []byte) bool {
+	return inRange(p.Self().ID(), p.nodeRadius, contentId)
+}
+
+func (p *PortalProtocol) Get(contentId []byte) ([]byte, error) {
+	return p.storage.Get(contentId)
+}
+
+func (p *PortalProtocol) Put(contentId []byte, content []byte) error {
+	return p.storage.Put(contentId, content)
+}
+
+func (p *PortalProtocol) GetContent() <-chan *ContentElement {
+	return p.contentQueue
 }
 
 func inRange(nodeId enode.ID, nodeRadius *uint256.Int, contentId []byte) bool {

@@ -262,7 +262,7 @@ func TestPortalWireProtocol(t *testing.T) {
 	_, err = rand.Read(largeTestContent)
 	assert.NoError(t, err)
 
-	err = node1.storage.Put(node1.toContentId([]byte("large_test_key")), largeTestContent)
+	err = node1.storage.Put(node1.ToContentId([]byte("large_test_key")), largeTestContent)
 	assert.NoError(t, err)
 
 	flag, content, err = node2.findContent(node1.localNode.Node(), []byte("large_test_key"))
@@ -318,24 +318,6 @@ func TestCancel(t *testing.T) {
 	time.Sleep(time.Second * 3)
 }
 
-// func TestInsertWithDistance(t *testing.T) {
-// 	targetId := uint256.NewInt(0).Bytes32()
-// 	nodes := make([]*node, 0, 10)
-// 	for i := 0; i < 10; i++ {
-// 		enode := &node{
-// 			Node: enode.Node{
-// 				id: enode.ID(uint256.NewInt(uint64(i)).Bytes32()),
-// 			},
-// 		}
-// 		nodes = append(nodes, enode)
-// 	}
-// 	newNode := &node{
-// 		Node: &enode.Node{
-// 			id: uint256.NewInt(20).Bytes32(),
-// 		},
-// 	}
-// }
-
 func TestContentLookup(t *testing.T) {
 	node1, err := setupLocalPortalNode(":17777", nil)
 	assert.NoError(t, err)
@@ -361,7 +343,7 @@ func TestContentLookup(t *testing.T) {
 
 	contentKey := []byte{0x3, 0x4}
 	content := []byte{0x1, 0x2}
-	contentId := node1.toContentId(contentKey)
+	contentId := node1.ToContentId(contentKey)
 
 	err = node3.storage.Put(contentId, content)
 	assert.NoError(t, err)
