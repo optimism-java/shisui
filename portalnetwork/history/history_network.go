@@ -7,10 +7,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/p2p/discover"
+	"github.com/ethereum/go-ethereum/portalnetwork/storage"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/signer/storage"
 	"github.com/ethereum/go-ethereum/trie"
-	"golang.org/x/crypto/sha3"
 )
 
 type ContentType byte
@@ -29,7 +28,7 @@ var (
 	ErrReceiptsHashIsNotEqual   = errors.New("receipts hash is not equal")
 	ErrContentOutOfRange        = errors.New("content out of range")
 	ErrHeaderWithProofIsInvalid = errors.New("header proof is invalid")
-	ErrInvalidBlockHash = errors.New("invalid block hash")
+	ErrInvalidBlockHash         = errors.New("invalid block hash")
 )
 
 type ContentKey struct {
@@ -61,14 +60,14 @@ func FromBlockBodyLegacy(b *BlockBodyLegacy) (*types.Body, error) {
 	transactions := make([]*types.Transaction, 0, len(b.Transactions))
 	for _, t := range b.Transactions {
 		tran := new(types.Transaction)
-		err := rlp.DecodeBytes(t, tran)
+		err := tran.UnmarshalBinary(t)
 		if err != nil {
 			return nil, err
 		}
 		transactions = append(transactions, tran)
 	}
 	uncles := make([]*types.Header, 0, len(b.Uncles))
-	err := rlp.DecodeBytes(b.Uncles, uncles)
+	err := rlp.DecodeBytes(b.Uncles, &uncles)
 	return &types.Body{
 		Uncles:       uncles,
 		Transactions: transactions,
@@ -80,14 +79,14 @@ func FromPortalBlockBodyShanghai(b *PortalBlockBodyShanghai) (*types.Body, error
 	transactions := make([]*types.Transaction, 0, len(b.Transactions))
 	for _, t := range b.Transactions {
 		tran := new(types.Transaction)
-		err := rlp.DecodeBytes(t, tran)
+		err := tran.UnmarshalBinary(t)
 		if err != nil {
 			return nil, err
 		}
 		transactions = append(transactions, tran)
 	}
 	uncles := make([]*types.Header, 0, len(b.Uncles))
-	err := rlp.DecodeBytes(b.Uncles, uncles)
+	err := rlp.DecodeBytes(b.Uncles, &uncles)
 	withdrawals := make([]*types.Withdrawal, 0, len(b.Withdrawals))
 	for _, w := range b.Withdrawals {
 		withdrawal := new(types.Withdrawal)
@@ -107,13 +106,13 @@ func FromPortalBlockBodyShanghai(b *PortalBlockBodyShanghai) (*types.Body, error
 // FromPortalReceipts convert PortalReceipts to types.Receipt
 func FromPortalReceipts(r *PortalReceipts) ([]*types.Receipt, error) {
 	res := make([]*types.Receipt, 0, len(r.Receipts))
-	for _, r := range r.Receipts {
-		receipt := new(types.Receipt)
-		err := rlp.DecodeBytes(r, receipt)
+	for _, reci := range r.Receipts {
+		recipt := new(types.Receipt)
+		err := recipt.UnmarshalBinary(reci)
 		if err != nil {
 			return nil, err
 		}
-		res = append(res, receipt)
+		res = append(res, recipt)
 	}
 	return res, nil
 }
@@ -158,7 +157,7 @@ func toPortalBlockBodyShanghai(b *types.Body) (*PortalBlockBodyShanghai, error) 
 func ToPortalReceipts(receipts []*types.Receipt) (*PortalReceipts, error) {
 	res := make([][]byte, 0, len(receipts))
 	for _, r := range receipts {
-		b, err := rlp.EncodeToBytes(r)
+		b, err := r.MarshalBinary()
 		if err != nil {
 			return nil, err
 		}
@@ -209,47 +208,6 @@ func ValidateBlockHeaderBytes(headerBytes []byte, blockHash []byte) (*types.Head
 	return header, nil
 }
 
-func validateBlockBodyLegacy(body *BlockBodyLegacy, header *types.Header) error {
-	keccak := sha3.NewLegacyKeccak256()
-	uncleHash := keccak.Sum(body.Uncles)
-	if !bytes.Equal(uncleHash, header.UncleHash[:]) {
-		return ErrUnclesHashIsNotEqual
-	}
-	keccak.Reset()
-	for _, tx := range body.Transactions {
-		_, err := keccak.Write(tx)
-		if err != nil {
-			return err
-		}
-	}
-	txHash := keccak.Sum(nil)
-	if !bytes.Equal(txHash, header.TxHash.Bytes()) {
-		return ErrTxHashIsNotEqual
-	}
-	return nil
-}
-
-func validatePortalBlockBodyShanghai(body *PortalBlockBodyShanghai, header *types.Header) error {
-	legacy := &BlockBodyLegacy{
-		Transactions: body.Transactions,
-		Uncles:       body.Uncles,
-	}
-	if err := validateBlockBodyLegacy(legacy, header); err != nil {
-		return err
-	}
-	keccak := sha3.NewLegacyKeccak256()
-	for _, withdrawal := range body.Withdrawals {
-		_, err := keccak.Write(withdrawal)
-		if err != nil {
-			return err
-		}
-	}
-	if !bytes.Equal(keccak.Sum(nil), header.WithdrawalsHash.Bytes()) {
-		return ErrWithdrawalHashIsNotEqual
-	}
-	return nil
-}
-
 func validateBlockBody(body *types.Body, header *types.Header) error {
 	if hash := types.CalcUncleHash(body.Uncles); !bytes.Equal(hash[:], header.UncleHash.Bytes()) {
 		return ErrUnclesHashIsNotEqual
@@ -292,36 +250,24 @@ func ValidateBlockBodyBytes(bodyBytes []byte, header *types.Header) (*types.Body
 	return body, err
 }
 
-func caclRootHash(input [][]byte) ([]byte, error) {
-	keccak := sha3.NewLegacyKeccak256()
-	for _, i := range input {
-		_, err := keccak.Write(i)
-		if err != nil {
-			return nil, err
-		}
-	}
-	hash := keccak.Sum(nil)
-	return hash, nil
-}
-
-func ValidatePortalReceipts(receipt *PortalReceipts, receiptsRoot []byte) error {
-	hash, err := caclRootHash(receipt.Receipts)
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(hash, receiptsRoot) {
-		return ErrReceiptsHashIsNotEqual
-	}
-	return nil
-}
-
 func ValidatePortalReceiptsBytes(receiptBytes, receiptsRoot []byte) ([]*types.Receipt, error) {
 	portalReceipts := new(PortalReceipts)
 	err := portalReceipts.UnmarshalSSZ(receiptBytes)
 	if err != nil {
 		return nil, err
 	}
-	return FromPortalReceipts(portalReceipts)
+
+	receipts, err := FromPortalReceipts(portalReceipts)
+	if err != nil {
+		return nil, err
+	}
+
+	root := types.DeriveSha(types.Receipts(receipts), trie.NewStackTrie(nil))
+
+	if !bytes.Equal(root[:], receiptsRoot) {
+		return nil, errors.New("receipt root is not equal to the header.ReceiptHash")
+	}
+	return receipts, nil
 }
 
 func NewHistoryNetwork(portalProtocol *discover.PortalProtocol, accu *MasterAccumulator) *HistoryNetwork {
@@ -356,7 +302,7 @@ func (h *HistoryNetwork) GetBlockHeader(blockHash []byte) (*types.Header, error)
 
 	res, err := h.portalProtocol.Get(contentId)
 	// other error
-	if err != nil && err != storage.ErrNotFound {
+	if err != nil && err != storage.ErrContentNotFound {
 		return nil, err
 	}
 	// no error
@@ -370,14 +316,13 @@ func (h *HistoryNetwork) GetBlockHeader(blockHash []byte) (*types.Header, error)
 		return header, err
 	}
 	// no content in local storage
-
 	for retries := 0; retries < requestRetries; retries++ {
 		content, err := h.portalProtocol.ContentLookup(contentKey)
 		if err != nil {
-			return nil, err
+			continue
 		}
 
-		headerWithProof, err := DecodeBlockHeaderWithProof(res)
+		headerWithProof, err := DecodeBlockHeaderWithProof(content)
 		if err != nil {
 			continue
 		}
@@ -411,7 +356,8 @@ func (h *HistoryNetwork) GetBlockBody(blockHash []byte) (*types.Body, error) {
 
 	res, err := h.portalProtocol.Get(contentId)
 	// other error
-	if err != nil && err != storage.ErrNotFound {
+	// TODO maybe use nil res to replace the ErrContentNotFound
+	if err != nil && err != storage.ErrContentNotFound {
 		return nil, err
 	}
 	// no error
@@ -424,9 +370,9 @@ func (h *HistoryNetwork) GetBlockBody(blockHash []byte) (*types.Body, error) {
 	for retries := 0; retries < requestRetries; retries++ {
 		content, err := h.portalProtocol.ContentLookup(contentKey)
 		if err != nil {
-			return nil, err
+			continue
 		}
-		body, err := DecodePortalBlockBodyBytes(res)
+		body, err := DecodePortalBlockBodyBytes(content)
 		if err != nil {
 			continue
 		}
@@ -456,7 +402,7 @@ func (h *HistoryNetwork) GetReceipts(blockHash []byte) ([]*types.Receipt, error)
 
 	res, err := h.portalProtocol.Get(contentId)
 	// other error
-	if err != nil && err != storage.ErrNotFound {
+	if err != nil && err != storage.ErrContentNotFound {
 		return nil, err
 	}
 	// no error
@@ -474,7 +420,7 @@ func (h *HistoryNetwork) GetReceipts(blockHash []byte) ([]*types.Receipt, error)
 	for retries := 0; retries < requestRetries; retries++ {
 		content, err := h.portalProtocol.ContentLookup(contentKey)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		receipts, err := ValidatePortalReceiptsBytes(content, header.ReceiptHash.Bytes())
 		if err != nil {
@@ -484,7 +430,7 @@ func (h *HistoryNetwork) GetReceipts(blockHash []byte) ([]*types.Receipt, error)
 		_ = h.portalProtocol.Put(contentId, content)
 		return receipts, nil
 	}
-	return nil, ErrContentOutOfRange
+	return nil, storage.ErrContentNotFound
 }
 
 func decodeEpochAccumulator(data []byte) (*EpochAccumulator, error) {
@@ -499,7 +445,7 @@ func (h *HistoryNetwork) GetEpochAccumulator(epochHash []byte) (*EpochAccumulato
 
 	res, err := h.portalProtocol.Get(contentId)
 	// other error
-	if err != nil && err != storage.ErrNotFound {
+	if err != nil && err != storage.ErrContentNotFound {
 		return nil, err
 	}
 	// no error
@@ -510,9 +456,9 @@ func (h *HistoryNetwork) GetEpochAccumulator(epochHash []byte) (*EpochAccumulato
 	for retries := 0; retries < requestRetries; retries++ {
 		content, err := h.portalProtocol.ContentLookup(contentKey)
 		if err != nil {
-			return nil, err
+			continue
 		}
-		epochAccu, err := decodeEpochAccumulator(res)
+		epochAccu, err := decodeEpochAccumulator(content)
 		if err != nil {
 			continue
 		}
@@ -528,7 +474,7 @@ func (h *HistoryNetwork) GetEpochAccumulator(epochHash []byte) (*EpochAccumulato
 		_ = h.portalProtocol.Put(contentId, content)
 		return epochAccu, nil
 	}
-	return nil, ErrContentOutOfRange
+	return nil, storage.ErrContentNotFound
 }
 
 func DecodeBlockHeaderWithProof(content []byte) (*BlockHeaderWithProof, error) {
@@ -538,7 +484,6 @@ func DecodeBlockHeaderWithProof(content []byte) (*BlockHeaderWithProof, error) {
 }
 
 func (h *HistoryNetwork) validateContent(contentKey []byte, content []byte) error {
-
 	switch ContentType(contentKey[0]) {
 	case BlockHeaderType:
 		headerWithProof, err := DecodeBlockHeaderWithProof(content)
