@@ -275,7 +275,6 @@ func TestGetContentByKey(t *testing.T) {
 	require.NotNil(t, epoch)
 }
 
-
 type contentEntry struct {
 	key   []byte
 	value []byte
