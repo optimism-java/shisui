@@ -176,11 +176,7 @@ func TestPortalBlockShanghai(t *testing.T) {
 func TestGetContentByKey(t *testing.T) {
 	historyNetwork1, err := genHistoryNetwork(":7895", nil)
 	require.NoError(t, err)
-	err = historyNetwork1.Start()
-	require.NoError(t, err)
 	historyNetwork2, err := genHistoryNetwork(":7896", []*enode.Node{historyNetwork1.portalProtocol.Self()})
-	require.NoError(t, err)
-	err = historyNetwork2.Start()
 	require.NoError(t, err)
 	// wait node start
 	time.Sleep(10 * time.Second)
@@ -349,6 +345,11 @@ func genHistoryNetwork(addr string, bootNodes []*enode.Node) (*HistoryNetwork, e
 	}
 
 	accu, err := NewMasterAccumulator()
+	if err != nil {
+		return nil, err
+	}
+
+	err = portalProtocol.Start()
 	if err != nil {
 		return nil, err
 	}

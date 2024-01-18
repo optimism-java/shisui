@@ -339,7 +339,7 @@ func (h *HistoryNetwork) GetBlockHeader(blockHash []byte) (*types.Header, error)
 		_ = h.portalProtocol.Put(contentId, content)
 		return header, nil
 	}
-	return nil, ErrContentOutOfRange
+	return nil, storage.ErrContentNotFound
 }
 
 func (h *HistoryNetwork) GetBlockBody(blockHash []byte) (*types.Body, error) {
@@ -385,7 +385,7 @@ func (h *HistoryNetwork) GetBlockBody(blockHash []byte) (*types.Body, error) {
 		_ = h.portalProtocol.Put(contentId, content)
 		return body, nil
 	}
-	return nil, ErrContentOutOfRange
+	return nil, storage.ErrContentNotFound
 }
 
 func (h *HistoryNetwork) GetReceipts(blockHash []byte) ([]*types.Receipt, error) {
