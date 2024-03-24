@@ -1426,7 +1426,8 @@ func (p *PortalProtocol) ContentLookup(contentKey []byte) ([]byte, bool, error) 
 	defer cancel()
 	resChan := make(chan *ContentInfoResp, 1)
 	defer close(resChan)
-	newLookup(lookupContext, p.table, p.Self().ID(), func(n *node) ([]*node, error) {
+	contentId := p.ToContentId(contentKey)
+	newLookup(lookupContext, p.table, enode.ID(contentId), func(n *node) ([]*node, error) {
 		return p.contentLookupWorker(unwrapNode(n), contentKey, resChan)
 	}).run()
 
@@ -1528,7 +1529,7 @@ func (p *PortalProtocol) TraceContentLookup(contentKey []byte) (*TraceContentRes
 		}
 	}()
 
-	newLookup(lookupContext, p.table, p.Self().ID(), func(n *node) ([]*node, error) {
+	newLookup(lookupContext, p.table, enode.ID(contentId), func(n *node) ([]*node, error) {
 		node := unwrapNode(n)
 		requestNodeChan <- node
 		return p.traceContentLookupWorker(node, contentKey, resChan)

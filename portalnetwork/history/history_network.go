@@ -119,27 +119,33 @@ func (h *HistoryNetwork) GetBlockHeader(blockHash []byte) (*types.Header, error)
 	}
 	// no content in local storage
 	for retries := 0; retries < requestRetries; retries++ {
-		// TODO log the err and continue
 		content, _, err := h.portalProtocol.ContentLookup(contentKey)
 		if err != nil {
+			h.log.Error("getBlockHeader failed", "contentKey", hexutil.Encode(contentKey), "err", err)
 			continue
 		}
 
 		headerWithProof, err := DecodeBlockHeaderWithProof(content)
 		if err != nil {
+			h.log.Error("decodeBlockHeaderWithProof failed", "content", hexutil.Encode(content), "err", err)
 			continue
 		}
 
 		header, err := ValidateBlockHeaderBytes(headerWithProof.Header, blockHash)
 		if err != nil {
+			h.log.Error("validateBlockHeaderBytes failed", "header", hexutil.Encode(headerWithProof.Header), "blockhash", hexutil.Encode(blockHash), "err", err)
 			continue
 		}
 		valid, err := h.verifyHeader(header, *headerWithProof.Proof)
 		if err != nil || !valid {
+			h.log.Error("verifyHeader failed", "err", err)
 			continue
 		}
 		// TODO handle the error
-		_ = h.portalProtocol.Put(contentId, content)
+		err = h.portalProtocol.Put(contentId, content)
+		if err != nil {
+			h.log.Error("failed to store content in getBlockHeader", "contentKey", hexutil.Encode(contentKey), "content", hexutil.Encode(content))
+		}
 		return header, nil
 	}
 	return nil, storage.ErrContentNotFound
@@ -169,23 +175,27 @@ func (h *HistoryNetwork) GetBlockBody(blockHash []byte) (*types.Body, error) {
 		return body, err
 	}
 	// no content in local storage
-
 	for retries := 0; retries < requestRetries; retries++ {
 		content, _, err := h.portalProtocol.ContentLookup(contentKey)
 		if err != nil {
+			h.log.Error("getBlockBody failed", "contentKey", hexutil.Encode(contentKey), "err", err)
 			continue
 		}
 		body, err := DecodePortalBlockBodyBytes(content)
 		if err != nil {
+			h.log.Error("decodePortalBlockBodyBytes failed", "content", hexutil.Encode(content), "err", err)
 			continue
 		}
 
 		err = validateBlockBody(body, header)
 		if err != nil {
+			h.log.Error("validateBlockBody failed", "header", "err", err)
 			continue
 		}
-		// TODO handle the error
-		_ = h.portalProtocol.Put(contentId, content)
+		err = h.portalProtocol.Put(contentId, content)
+		if err != nil {
+			h.log.Error("failed to store content in getBlockBody", "contentKey", hexutil.Encode(contentKey), "content", hexutil.Encode(content))
+		}
 		return body, nil
 	}
 	return nil, storage.ErrContentNotFound
@@ -223,14 +233,18 @@ func (h *HistoryNetwork) GetReceipts(blockHash []byte) ([]*types.Receipt, error)
 	for retries := 0; retries < requestRetries; retries++ {
 		content, _, err := h.portalProtocol.ContentLookup(contentKey)
 		if err != nil {
+			h.log.Error("getReceipts failed", "contentKey", hexutil.Encode(contentKey), "err", err)
 			continue
 		}
 		receipts, err := ValidatePortalReceiptsBytes(content, header.ReceiptHash.Bytes())
 		if err != nil {
+			h.log.Error("validatePortalReceiptsBytes failed", "err", err)
 			continue
 		}
-		// TODO handle the error
-		_ = h.portalProtocol.Put(contentId, content)
+		err = h.portalProtocol.Put(contentId, content)
+		if err != nil {
+			h.log.Error("failed to store content in getReceipts", "contentKey", hexutil.Encode(contentKey), "content", hexutil.Encode(content))
+		}
 		return receipts, nil
 	}
 	return nil, storage.ErrContentNotFound
@@ -253,22 +267,28 @@ func (h *HistoryNetwork) GetEpochAccumulator(epochHash []byte) (*EpochAccumulato
 	for retries := 0; retries < requestRetries; retries++ {
 		content, _, err := h.portalProtocol.ContentLookup(contentKey)
 		if err != nil {
+			h.log.Error("getEpochAccumulator failed", "contentKey", hexutil.Encode(contentKey), "err", err)
 			continue
 		}
 		epochAccu, err := decodeEpochAccumulator(content)
 		if err != nil {
+			h.log.Error("decodeEpochAccumulator failed", "content", hexutil.Encode(content), "err", err)
 			continue
 		}
 		hash, err := epochAccu.HashTreeRoot()
 		if err != nil {
+			h.log.Error("hashTreeRoot failed", "err", err)
 			continue
 		}
 		mixHash := MixInLength(hash, epochSize)
 		if !bytes.Equal(mixHash, epochHash) {
+			h.log.Error("epochHash is not equal to mixHash", "mixHash", hexutil.Encode(mixHash), "epochHash", hexutil.Encode(epochHash))
 			continue
 		}
-		// TODO handle the error
-		_ = h.portalProtocol.Put(contentId, content)
+		err = h.portalProtocol.Put(contentId, content)
+		if err != nil {
+			h.log.Error("failed to store content in getReceipts", "contentKey", hexutil.Encode(contentKey), "content", hexutil.Encode(content))
+		}
 		return epochAccu, nil
 	}
 	return nil, storage.ErrContentNotFound
