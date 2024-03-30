@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/discover"
 	"github.com/ethereum/go-ethereum/portalnetwork/storage"
 	ssz "github.com/ferranbt/fastssz"
+	"github.com/ledgerwatch/erigon/portal"
 )
 
 const (
@@ -27,11 +28,15 @@ func (bn *BeaconNetwork) GetBestUpdatesAndCommittees(firstPeriod, count uint64) 
 		Count:       count,
 	}
 
-	_, err := bn.getContent(LightClientUpdate, lightClientUpdateKey)
+	content, err := bn.getContent(LightClientUpdate, lightClientUpdateKey)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	_, err = portal.DecodeDynamicListForkedObject[*portal.ForkedLightClientUpdate](content, 0, uint32(len(content)), 1000)
+	if err != nil {
+		return nil, nil, err
+	}
 	return nil, nil, err
 }
 

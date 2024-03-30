@@ -6,3 +6,8 @@
 	path = tests/evm-benchmarks
 	url = https://github.com/ipsilon/evm-benchmarks
 	shallow = true
+[submodule "erigon"]
+	path = erigon
+	url = https://github.com/optimism-java/erigon
+	branch = portal
+	shallow = true

@@ -10,6 +10,7 @@ GORUN = go run
 
 #? shisui: Build shisui
 shisui:
+	git submodule update --init -- ./erigon
 	go build ./cmd/shisui/main.go
 	cp main $(GOBIN)/shisui
 	@echo "Done building."
