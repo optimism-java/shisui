@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/portalnetwork/storage"
 	"github.com/prysmaticlabs/go-bitfield"
 	"golang.org/x/exp/slices"
 
@@ -22,22 +23,6 @@ import (
 	"github.com/optimism-java/utp-go"
 	"github.com/stretchr/testify/assert"
 )
-
-type MockStorage struct {
-	db map[string][]byte
-}
-
-func (m *MockStorage) Get(contentKey []byte, contentId []byte) ([]byte, error) {
-	if content, ok := m.db[string(contentId)]; ok {
-		return content, nil
-	}
-	return nil, ContentNotFound
-}
-
-func (m *MockStorage) Put(contentKey []byte, contentId []byte, content []byte) error {
-	m.db[string(contentId)] = content
-	return nil
-}
 
 func setupLocalPortalNode(addr string, bootNodes []*enode.Node) (*PortalProtocol, error) {
 	conf := DefaultPortalProtocolConfig()
@@ -101,7 +86,7 @@ func setupLocalPortalNode(addr string, bootNodes []*enode.Node) (*PortalProtocol
 	}
 
 	contentQueue := make(chan *ContentElement, 50)
-	portalProtocol, err := NewPortalProtocol(conf, string(portalwire.HistoryNetwork), privKey, conn, localNode, discV5, &MockStorage{db: make(map[string][]byte)}, contentQueue)
+	portalProtocol, err := NewPortalProtocol(conf, string(portalwire.HistoryNetwork), privKey, conn, localNode, discV5, &storage.MockStorage{Db: make(map[string][]byte)}, contentQueue)
 	if err != nil {
 		return nil, err
 	}
