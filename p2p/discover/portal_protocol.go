@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/ethereum/go-ethereum/p2p/discover/v5wire"
 
 	"github.com/VictoriaMetrics/fastcache"
@@ -26,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/discover/portalwire"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
+	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
 	"github.com/ethereum/go-ethereum/portalnetwork/storage"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -138,13 +140,15 @@ type traceContentInfoResp struct {
 type PortalProtocolOption func(p *PortalProtocol)
 
 type PortalProtocolConfig struct {
-	BootstrapNodes  []*enode.Node
-	NodeIP          net.IP
+	BootstrapNodes []*enode.Node
+	// NodeIP          net.IP
 	ListenAddr      string
 	NetRestrict     *netutil.Netlist
 	NodeRadius      *uint256.Int
 	RadiusCacheSize int
 	NodeDBPath      string
+	NAT             nat.Interface
+	clock           mclock.Clock
 }
 
 func DefaultPortalProtocolConfig() *PortalProtocolConfig {
@@ -156,6 +160,8 @@ func DefaultPortalProtocolConfig() *PortalProtocolConfig {
 		NodeRadius:      nodeRadius,
 		RadiusCacheSize: 32 * 1024 * 1024,
 		NodeDBPath:      "",
+		// NAT:             nat.Any(),
+		clock: mclock.System{},
 	}
 }
 
@@ -190,6 +196,10 @@ type PortalProtocol struct {
 
 	contentQueue chan *ContentElement
 	offerQueue   chan *OfferRequestWithNode
+
+	portMappingRegister chan *portMapping
+	clock               mclock.Clock
+	NAT                 nat.Interface
 }
 
 func defaultContentIdFunc(contentKey []byte) []byte {
@@ -222,6 +232,8 @@ func NewPortalProtocol(config *PortalProtocolConfig, protocolId string, privateK
 		offerQueue:     make(chan *OfferRequestWithNode, concurrentOffers),
 		conn:           conn,
 		DiscV5:         discV5,
+		NAT:            config.NAT,
+		clock:          config.clock,
 	}
 
 	for _, opt := range opts {
@@ -232,6 +244,8 @@ func NewPortalProtocol(config *PortalProtocolConfig, protocolId string, privateK
 }
 
 func (p *PortalProtocol) Start() error {
+	p.setupPortMapping()
+
 	err := p.setupDiscV5AndTable()
 	if err != nil {
 		return err
@@ -286,13 +300,13 @@ func (p *PortalProtocol) setupUDPListening() error {
 	p.localNode.SetFallbackUDP(laddr.Port)
 	p.Log.Debug("UDP listener up", "addr", laddr)
 	// TODO: NAT
-	//if !laddr.IP.IsLoopback() && !laddr.IP.IsPrivate() {
-	//	srv.portMappingRegister <- &portMapping{
-	//		protocol: "UDP",
-	//		name:     "ethereum peer discovery",
-	//		port:     laddr.Port,
-	//	}
-	//}
+	if !laddr.IP.IsLoopback() && !laddr.IP.IsPrivate() {
+		p.portMappingRegister <- &portMapping{
+			protocol: "UDP",
+			name:     "ethereum portal peer discovery",
+			port:     laddr.Port,
+		}
+	}
 
 	var err error
 	p.packetRouter = utp.NewPacketRouter(
