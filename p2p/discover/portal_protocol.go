@@ -286,10 +286,13 @@ func (p *PortalProtocol) RoutingTableInfo() [][]string {
 	return nodes
 }
 
-func (p *PortalProtocol) AddEnr(n *enode.Node) {
-	p.table.addFoundNode(n, true)
+func (p *PortalProtocol) AddEnr(n *enode.Node) (bool, error) {
+	if added := p.table.addFoundNode(n, true); !added {
+		return false, errors.New("failed to add found node")
+	}
 	id := n.ID().String()
 	p.radiusCache.Set([]byte(id), MaxDistance)
+	return true, nil
 }
 
 func (p *PortalProtocol) Radius() *uint256.Int {
@@ -546,7 +549,9 @@ func (p *PortalProtocol) processOffer(target *enode.Node, resp []byte, request *
 	}
 
 	p.Log.Trace("Received accept response", "id", target.ID(), "accept", accept)
-	p.table.addFoundNode(target, true)
+	if added := p.table.addFoundNode(target, true); !added {
+		return nil, errors.New("failed to add found node")
+	}
 
 	var contentKeyLen int
 	if request.Kind == TransientOfferRequestKind {
@@ -666,7 +671,9 @@ func (p *PortalProtocol) processContent(target *enode.Node, resp []byte) (byte, 
 		}
 
 		p.Log.Trace("Received content response", "id", target.ID(), "content", content)
-		p.table.addFoundNode(target, true)
+		if added := p.table.addFoundNode(target, true); !added {
+			return 0xff, nil, errors.New("failed to add found node")
+		}
 		return resp[1], content.Content, nil
 	case portalwire.ContentConnIdSelector:
 		connIdMsg := &portalwire.ConnectionId{}
@@ -676,7 +683,9 @@ func (p *PortalProtocol) processContent(target *enode.Node, resp []byte) (byte, 
 		}
 
 		p.Log.Trace("Received returned content response", "id", target.ID(), "connIdMsg", connIdMsg)
-		p.table.addFoundNode(target, true)
+		if added := p.table.addFoundNode(target, true); !added {
+			return 0xff, nil, errors.New("failed to add found node")
+		}
 		connctx, conncancel := context.WithTimeout(p.closeCtx, defaultUTPConnectTimeout)
 		laddr := p.utp.Addr().(*utp.Addr)
 		raddr := &utp.Addr{IP: target.IP(), Port: target.UDP()}
@@ -718,7 +727,9 @@ func (p *PortalProtocol) processContent(target *enode.Node, resp []byte) (byte, 
 		}
 
 		p.Log.Trace("Received content response", "id", target.ID(), "enrs", enrs)
-		p.table.addFoundNode(target, true)
+		if added := p.table.addFoundNode(target, true); !added {
+			return 0xff, nil, errors.New("failed to add found node")
+		}
 		nodes := p.filterNodes(target, enrs.Enrs, nil)
 		return resp[1], nodes, nil
 	default:
@@ -741,7 +752,9 @@ func (p *PortalProtocol) processNodes(target *enode.Node, resp []byte, distances
 		return nil, err
 	}
 
-	p.table.addFoundNode(target, true)
+	if added := p.table.addFoundNode(target, true); !added {
+		return nil, errors.New("failed to add found node")
+	}
 	nodes := p.filterNodes(target, nodesResp.Enrs, distances)
 
 	return nodes, nil
@@ -798,7 +811,9 @@ func (p *PortalProtocol) processPong(target *enode.Node, resp []byte) (*portalwi
 	}
 
 	p.Log.Trace("Received pong response", "id", target.ID(), "pong", pong, "customPayload", customPayload)
-	p.table.addFoundNode(target, true)
+	if added := p.table.addFoundNode(target, true); !added {
+		return nil, errors.New("failed to add found node")
+	}
 
 	p.radiusCache.Set([]byte(target.ID().String()), customPayload.Radius)
 	return pong, nil
@@ -806,7 +821,10 @@ func (p *PortalProtocol) processPong(target *enode.Node, resp []byte) (*portalwi
 
 func (p *PortalProtocol) handleUtpTalkRequest(id enode.ID, addr *net.UDPAddr, msg []byte) []byte {
 	if n := p.DiscV5.getNode(id); n != nil {
-		p.table.addInboundNode(n)
+		if added := p.table.addInboundNode(n); !added {
+			p.Log.Error("failed to add inbound node", "id", id)
+			return nil
+		}
 	}
 
 	p.putCacheId(id, addr)
@@ -817,7 +835,10 @@ func (p *PortalProtocol) handleUtpTalkRequest(id enode.ID, addr *net.UDPAddr, ms
 
 func (p *PortalProtocol) handleTalkRequest(id enode.ID, addr *net.UDPAddr, msg []byte) []byte {
 	if n := p.DiscV5.getNode(id); n != nil {
-		p.table.addInboundNode(n)
+		if added := p.table.addInboundNode(n); !added {
+			p.Log.Error("failed to add inbound node", "id", id)
+			return nil
+		}
 	}
 	p.putCacheId(id, addr)
 
@@ -1343,7 +1364,9 @@ func (p *PortalProtocol) lookupWorker(destNode *enode.Node, target enode.ID) ([]
 	}
 	for _, n := range r {
 		if n.ID() != p.Self().ID() {
-			p.table.addFoundNode(n, false)
+			if added := p.table.addFoundNode(n, false); !added {
+				return nil, errors.New("failed to add found node")
+			}
 			nodes.push(n, portalFindnodesResultLimit)
 		}
 	}

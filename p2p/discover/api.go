@@ -102,7 +102,10 @@ func (d *DiscV5API) AddEnr(enr string) (bool, error) {
 		return false, err
 	}
 
-	d.DiscV5.tab.addFoundNode(n, true)
+	if added := d.DiscV5.tab.addFoundNode(n, true); !added {
+		return false, errors.New("failed to add found node")
+	}
+
 	return true, nil
 }
 
@@ -250,21 +253,23 @@ func (p *PortalProtocolAPI) AddEnr(enr string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	p.portalProtocol.AddEnr(n)
-	return true, nil
+	return p.portalProtocol.AddEnr(n)
 }
 
-func (p *PortalProtocolAPI) AddEnrs(enrs []string) bool {
+func (p *PortalProtocolAPI) AddEnrs(enrs []string) (bool, error) {
 	// Note: unspecified RPC, but useful for our local testnet test
 	for _, enr := range enrs {
 		n, err := enode.Parse(enode.ValidSchemes, enr)
 		if err != nil {
 			continue
 		}
-		p.portalProtocol.AddEnr(n)
+		_, err = p.portalProtocol.AddEnr(n)
+		if err != nil {
+			return false, err
+		}
 	}
 
-	return true
+	return true, nil
 }
 
 func (p *PortalProtocolAPI) GetEnr(nodeId string) (string, error) {
