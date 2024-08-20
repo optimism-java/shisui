@@ -60,9 +60,8 @@ type Builder struct {
 	builderPublicKey            phase0.BLSPubKey
 	builderSigningDomain        phase0.Domain
 
-	builderRetryInterval          time.Duration
-	builderBlockTime              time.Duration
-	submissionOffsetFromEndOfSlot time.Duration
+	builderRetryInterval time.Duration
+	builderBlockTime     time.Duration
 
 	slotMu        sync.Mutex
 	slotAttrs     BuilderPayloadAttributes
@@ -77,14 +76,13 @@ type Builder struct {
 
 // BuilderArgs is a struct that contains all the arguments needed to create a new Builder
 type BuilderArgs struct {
-	sk                            *bls.SecretKey
-	builderSigningDomain          phase0.Domain
-	builderRetryInterval          time.Duration
-	blockTime                     time.Duration
-	eth                           IEthereumService
-	ignoreLatePayloadAttributes   bool
-	beaconClient                  IBeaconClient
-	submissionOffsetFromEndOfSlot time.Duration
+	sk                          *bls.SecretKey
+	builderSigningDomain        phase0.Domain
+	builderRetryInterval        time.Duration
+	blockTime                   time.Duration
+	eth                         IEthereumService
+	ignoreLatePayloadAttributes bool
+	beaconClient                IBeaconClient
 }
 
 // SubmitBlockOpts is a struct that contains all the arguments needed to submit a block to the relay
@@ -111,15 +109,14 @@ func NewBuilder(args BuilderArgs) (*Builder, error) {
 
 	slotCtx, slotCtxCancel := context.WithCancel(context.Background())
 	return &Builder{
-		eth:                           args.eth,
-		ignoreLatePayloadAttributes:   args.ignoreLatePayloadAttributes,
-		beaconClient:                  args.beaconClient,
-		builderSecretKey:              args.sk,
-		builderPublicKey:              pk,
-		builderSigningDomain:          args.builderSigningDomain,
-		builderRetryInterval:          args.builderRetryInterval,
-		builderBlockTime:              args.blockTime,
-		submissionOffsetFromEndOfSlot: args.submissionOffsetFromEndOfSlot,
+		eth:                         args.eth,
+		ignoreLatePayloadAttributes: args.ignoreLatePayloadAttributes,
+		beaconClient:                args.beaconClient,
+		builderSecretKey:            args.sk,
+		builderPublicKey:            pk,
+		builderSigningDomain:        args.builderSigningDomain,
+		builderRetryInterval:        args.builderRetryInterval,
+		builderBlockTime:            args.blockTime,
 
 		slotCtx:       slotCtx,
 		slotCtxCancel: slotCtxCancel,
@@ -188,7 +185,7 @@ func (b *Builder) GetPayload(request PayloadRequestV1) (*builderSpec.VersionedSu
 	b.bestBlockMu.Unlock()
 
 	if bestBlock == nil {
-		log.Error("no builder submissions")
+		log.Warn("no builder submissions")
 		return nil, ErrNoPayloads
 	}
 
@@ -199,7 +196,7 @@ func (b *Builder) GetPayload(request PayloadRequestV1) (*builderSpec.VersionedSu
 	}
 
 	if submittedSlot != uint64(request.Slot) {
-		log.Error("slot not equal", "requested", request.Slot, "block", submittedSlot)
+		log.Warn("slot not equal", "requested", request.Slot, "block", submittedSlot)
 		return nil, ErrSlotMismatch
 	}
 
@@ -210,7 +207,7 @@ func (b *Builder) GetPayload(request PayloadRequestV1) (*builderSpec.VersionedSu
 	}
 
 	if submittedParentHash.String() != request.ParentHash.String() {
-		log.Error("parent hash not equal", "requested", request.ParentHash, "block", submittedParentHash.String())
+		log.Warn("parent hash not equal", "requested", request.ParentHash, "block", submittedParentHash.String())
 		return nil, ErrParentHashMismatch
 	}
 
@@ -355,7 +352,7 @@ func (b *Builder) getBlockRequest(executableData *engine.ExecutionPayloadEnvelop
 }
 
 func (b *Builder) handlePayloadAttributes(attrs *BuilderPayloadAttributes) error {
-	log.Info("Payload attribute received", "slot", attrs.Slot, "hash", attrs.HeadHash, "txs", attrs.Transactions)
+	log.Info("handling payload attribute", "slot", attrs.Slot, "hash", attrs.HeadHash)
 	if attrs == nil {
 		return nil
 	}

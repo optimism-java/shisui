@@ -7,7 +7,7 @@ import (
 )
 
 type testBeaconClient struct {
-	slot      uint64
+	slot uint64
 }
 
 func (b *testBeaconClient) Stop() {}

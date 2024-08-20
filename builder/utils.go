@@ -39,7 +39,7 @@ func handleError(w http.ResponseWriter, err error) {
 		errorMsg = "error processing request"
 		status = http.StatusInternalServerError
 	}
-	
+
 	respondError(w, status, errorMsg)
 }
 

@@ -26,7 +26,7 @@ type EthereumService struct {
 
 func NewEthereumService(eth *eth.Ethereum) *EthereumService {
 	return &EthereumService{
-		eth:         eth,
+		eth: eth,
 	}
 }
 
@@ -36,7 +36,7 @@ func (s *EthereumService) BuildBlock(attrs *BuilderPayloadAttributes) (*engine.E
 	args := &miner.BuildPayloadArgs{
 		Parent:       attrs.HeadHash,
 		Timestamp:    uint64(attrs.Timestamp),
-		FeeRecipient: attrs.SuggestedFeeRecipient,
+		FeeRecipient: attrs.SuggestedFeeRecipient, // TODO (builder): use builder key as fee recipient
 		GasLimit:     &attrs.GasLimit,
 		Random:       attrs.Random,
 		Withdrawals:  attrs.Withdrawals,

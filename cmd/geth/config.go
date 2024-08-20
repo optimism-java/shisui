@@ -213,7 +213,7 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 		cfg.Eth.OverrideVerkle = &v
 	}
 
-	backend, eth := utils.RegisterEthService(stack, &cfg.Eth,  &cfg.Builder)
+	backend, eth := utils.RegisterEthService(stack, &cfg.Eth, &cfg.Builder)
 
 	// Create gauge with geth system and build information
 	if eth != nil { // The 'eth' backend may be nil in light mode

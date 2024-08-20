@@ -674,13 +674,13 @@ var (
 	BuilderEnabled = &cli.BoolFlag{
 		Name:     "builder",
 		Usage:    "Enable the builder",
-		EnvVars: []string{"BUILDER_ENABLED"},
+		EnvVars:  []string{"BUILDER_ENABLED"},
 		Category: flags.BuilderCategory,
 	}
 	BuilderIgnoreLatePayloadAttributes = &cli.BoolFlag{
 		Name:     "builder.ignore_late_payload_attributes",
 		Usage:    "Builder will ignore all but the first payload attributes. Use if your CL sends non-canonical head updates.",
-		EnvVars: []string{"BUILDER_IGNORE_LATE_PAYLOAD_ATTRIBUTES"},
+		EnvVars:  []string{"BUILDER_IGNORE_LATE_PAYLOAD_ATTRIBUTES"},
 		Category: flags.BuilderCategory,
 	}
 	BuilderSecretKey = &cli.StringFlag{
