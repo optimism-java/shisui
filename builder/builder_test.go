@@ -1,167 +1,174 @@
 package builder
 
-// import (
-// 	"math/big"
-// 	"testing"
-// 	"time"
+import (
+	"math/big"
+	"testing"
+	"time"
 
-// 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
-// 	"github.com/attestantio/go-eth2-client/spec/bellatrix"
-// 	"github.com/attestantio/go-eth2-client/spec/phase0"
-// 	"github.com/ethereum/go-ethereum/beacon/engine"
-// 	"github.com/ethereum/go-ethereum/common"
-// 	"github.com/ethereum/go-ethereum/common/hexutil"
-// 	"github.com/ethereum/go-ethereum/core"
-// 	"github.com/ethereum/go-ethereum/core/types"
-// 	"github.com/ethereum/go-ethereum/flashbotsextra"
-// 	"github.com/flashbots/go-boost-utils/bls"
-// 	"github.com/flashbots/go-boost-utils/ssz"
-// 	"github.com/flashbots/go-boost-utils/utils"
-// 	"github.com/holiman/uint256"
-// 	"github.com/stretchr/testify/require"
-// )
+	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
+	"github.com/attestantio/go-eth2-client/spec/bellatrix"
+	"github.com/attestantio/go-eth2-client/spec/deneb"
+	"github.com/attestantio/go-eth2-client/spec/capella"
+	"github.com/attestantio/go-eth2-client/spec/phase0"
+	"github.com/ethereum/go-ethereum/beacon/engine"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/flashbots/go-boost-utils/bls"
+	"github.com/flashbots/go-boost-utils/ssz"
+	"github.com/flashbots/go-boost-utils/utils"
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+)
 
-// func TestOnPayloadAttributes(t *testing.T) {
-// 	const (
-// 		validatorDesiredGasLimit = 30_000_000
-// 		payloadAttributeGasLimit = 0
-// 		parentBlockGasLimit      = 29_000_000
-// 	)
-// 	expectedGasLimit := core.CalcGasLimit(parentBlockGasLimit, validatorDesiredGasLimit)
+type testEthereumService struct {
+	synced             bool
+	testExecutableData *engine.ExecutionPayloadEnvelope
+	testBlock          *types.Block
+}
 
-// 	vsk, err := bls.SecretKeyFromBytes(hexutil.MustDecode("0x370bb8c1a6e62b2882f6ec76762a67b39609002076b95aae5b023997cf9b2dc9"))
-// 	require.NoError(t, err)
+func (t *testEthereumService) BuildBlock(attrs *BuilderPayloadAttributes) (*engine.ExecutionPayloadEnvelope, error) {
+	return t.testExecutableData, nil
+}
 
-// 	testBeacon := testBeaconClient{
-// 		slot:      56,
-// 	}
+func (t *testEthereumService) GetBlockByHash(hash common.Hash) *types.Block { return t.testBlock }
 
-// 	feeRecipient, _ := utils.HexToAddress("0xabcf8e0d4e9587369b2301d0790347320302cc00")
-// 	testRelay := testRelay{
-// 		gvsVd: ValidatorData{
-// 			Pubkey:       PubkeyHex(testBeacon.validator.Pk.String()),
-// 			FeeRecipient: feeRecipient,
-// 			GasLimit:     validatorDesiredGasLimit,
-// 		},
-// 	}
+func (t *testEthereumService) Config() *params.ChainConfig {
+	zeroTime := uint64(0)
+	config := params.TestChainConfig
+	config.CanyonTime = &zeroTime
+	config.EcotoneTime = &zeroTime
+	return config
+}
 
-// 	sk, err := bls.SecretKeyFromBytes(hexutil.MustDecode("0x31ee185dad1220a8c88ca5275e64cf5a5cb09cb621cb30df52c9bee8fbaaf8d7"))
-// 	require.NoError(t, err)
+func (t *testEthereumService) Synced() bool { return t.synced }
 
-// 	bDomain := ssz.ComputeDomain(ssz.DomainTypeAppBuilder, [4]byte{0x02, 0x0, 0x0, 0x0}, phase0.Root{})
+func TestGetPayloadV1(t *testing.T) {
+	const (
+		validatorDesiredGasLimit = 30_000_000
+		payloadAttributeGasLimit = 0
+		parentBlockGasLimit      = 29_000_000
+	)
+	expectedGasLimit := core.CalcGasLimit(parentBlockGasLimit, validatorDesiredGasLimit)
 
-// 	testExecutableData := &engine.ExecutableData{
-// 		ParentHash:   common.Hash{0x02, 0x03},
-// 		FeeRecipient: common.Address(feeRecipient),
-// 		StateRoot:    common.Hash{0x07, 0x16},
-// 		ReceiptsRoot: common.Hash{0x08, 0x20},
-// 		LogsBloom:    types.Bloom{}.Bytes(),
-// 		Number:       uint64(10),
-// 		GasLimit:     expectedGasLimit,
-// 		GasUsed:      uint64(100),
-// 		Timestamp:    uint64(105),
-// 		ExtraData:    hexutil.MustDecode("0x0042fafc"),
+	feeRecipient, err := utils.HexToAddress("0xabcf8e0d4e9587369b2301d0790347320302cc00")
+	require.NoError(t, err)
 
-// 		BaseFeePerGas: big.NewInt(16),
+	sk, err := bls.SecretKeyFromBytes(hexutil.MustDecode("0x31ee185dad1220a8c88ca5275e64cf5a5cb09cb621cb30df52c9bee8fbaaf8d7"))
+	require.NoError(t, err)
 
-// 		BlockHash:    common.HexToHash("0x68e516c8827b589fcb749a9e672aa16b9643437459508c467f66a9ed1de66a6c"),
-// 		Transactions: [][]byte{},
-// 	}
+	bDomain := ssz.ComputeDomain(ssz.DomainTypeAppBuilder, [4]byte{0x02, 0x0, 0x0, 0x0}, phase0.Root{})
 
-// 	testBlock, err := engine.ExecutableDataToBlock(*testExecutableData, nil, nil)
-// 	require.NoError(t, err)
+	zero := uint64(0)
+	blockHash := common.HexToHash("5fc0137650b887cdb47ae6426d5e0e368e315a2ad3f93df80a8d14f8e1ce239a")
+	testExecutableData := &engine.ExecutionPayloadEnvelope{
+		ExecutionPayload: &engine.ExecutableData{
+			ParentHash:   common.Hash{0x02, 0x03},
+			FeeRecipient: common.Address(feeRecipient),
+			StateRoot:    common.Hash{0x07, 0x16},
+			ReceiptsRoot: common.Hash{0x08, 0x20},
+			LogsBloom:    types.Bloom{}.Bytes(),
+			Number:       uint64(10),
+			GasLimit:     expectedGasLimit,
+			GasUsed:      uint64(100),
+			Timestamp:    uint64(105),
+			ExtraData:    hexutil.MustDecode("0x0042fafc"),
 
-// 	testPayloadAttributes := &types.BuilderPayloadAttributes{
-// 		Timestamp:             hexutil.Uint64(104),
-// 		Random:                common.Hash{0x05, 0x10},
-// 		SuggestedFeeRecipient: common.Address{0x04, 0x10},
-// 		GasLimit:              uint64(payloadAttributeGasLimit),
-// 		Slot:                  uint64(25),
-// 	}
+			BaseFeePerGas: big.NewInt(16),
 
-// 	testEthService := &testEthereumService{synced: true, testExecutableData: testExecutableData, testBlock: testBlock, testBlockValue: big.NewInt(10)}
-// 	builderArgs := BuilderArgs{
-// 		sk:                          sk,
-// 		ds:                          flashbotsextra.NilDbService{},
-// 		relay:                       &testRelay,
-// 		builderSigningDomain:        bDomain,
-// 		eth:                         testEthService,
-// 		dryRun:                      false,
-// 		ignoreLatePayloadAttributes: false,
-// 		validator:                   nil,
-// 		beaconClient:                &testBeacon,
-// 		limiter:                     nil,
-// 		blockConsumer:               flashbotsextra.NilDbService{},
-// 	}
-// 	builder, err := NewBuilder(builderArgs)
-// 	require.NoError(t, err)
-// 	builder.Start()
-// 	defer builder.Stop()
+			BlockHash:     blockHash,
+			Transactions:  [][]byte{},
+			Withdrawals:   types.Withdrawals{},
+			BlobGasUsed:   &zero,
+			ExcessBlobGas: &zero,
+		},
+		BlockValue:  big.NewInt(10),
+		BlobsBundle: &engine.BlobsBundleV1{},
+	}
 
-// 	err = builder.OnPayloadAttribute(testPayloadAttributes)
-// 	require.NoError(t, err)
-// 	time.Sleep(time.Second * 3)
+	testBlock, err := engine.ExecutableDataToBlock(*testExecutableData.ExecutionPayload, nil, nil)
+	require.NoError(t, err)
 
-// 	require.NotNil(t, testRelay.submittedMsg)
+	testPayloadAttributes := &BuilderPayloadAttributes{
+		Timestamp:             hexutil.Uint64(104),
+		Random:                common.Hash{0x05, 0x10},
+		SuggestedFeeRecipient: common.Address(feeRecipient),
+		GasLimit:              uint64(payloadAttributeGasLimit),
+		Slot:                  uint64(25),
+		HeadHash:              common.Hash{0x02, 0x03},
 
-// 	expectedProposerPubkey, err := utils.HexToPubkey(testBeacon.validator.Pk.String())
-// 	require.NoError(t, err)
+		NoTxPool:     false,
+		Transactions: []*types.Transaction{},
+	}
 
-// 	expectedMessage := builderApiV1.BidTrace{
-// 		Slot:                 uint64(25),
-// 		ParentHash:           phase0.Hash32{0x02, 0x03},
-// 		BuilderPubkey:        builder.builderPublicKey,
-// 		ProposerPubkey:       expectedProposerPubkey,
-// 		ProposerFeeRecipient: feeRecipient,
-// 		GasLimit:             expectedGasLimit,
-// 		GasUsed:              uint64(100),
-// 		Value:                &uint256.Int{0x0a},
-// 	}
-// 	copy(expectedMessage.BlockHash[:], hexutil.MustDecode("0x68e516c8827b589fcb749a9e672aa16b9643437459508c467f66a9ed1de66a6c")[:])
-// 	require.NotNil(t, testRelay.submittedMsg.Bellatrix)
-// 	require.Equal(t, expectedMessage, *testRelay.submittedMsg.Bellatrix.Message)
+	testEthService := &testEthereumService{
+		synced:             true,
+		testExecutableData: testExecutableData,
+		testBlock:          testBlock,
+	}
 
-// 	expectedExecutionPayload := bellatrix.ExecutionPayload{
-// 		ParentHash:    [32]byte(testExecutableData.ParentHash),
-// 		FeeRecipient:  feeRecipient,
-// 		StateRoot:     [32]byte(testExecutableData.StateRoot),
-// 		ReceiptsRoot:  [32]byte(testExecutableData.ReceiptsRoot),
-// 		LogsBloom:     [256]byte{},
-// 		PrevRandao:    [32]byte(testExecutableData.Random),
-// 		BlockNumber:   testExecutableData.Number,
-// 		GasLimit:      testExecutableData.GasLimit,
-// 		GasUsed:       testExecutableData.GasUsed,
-// 		Timestamp:     testExecutableData.Timestamp,
-// 		ExtraData:     hexutil.MustDecode("0x0042fafc"),
-// 		BaseFeePerGas: [32]byte{0x10},
-// 		BlockHash:     expectedMessage.BlockHash,
-// 		Transactions:  []bellatrix.Transaction{},
-// 	}
+	mockBeaconNode := newMockBeaconNode(*testPayloadAttributes)
+	builderArgs := BuilderArgs{
+		sk:                          sk,
+		builderSigningDomain:        bDomain,
+		builderRetryInterval:        200 * time.Millisecond,
+		blockTime:                   2 * time.Second,
+		eth:                         testEthService,
+		ignoreLatePayloadAttributes: false,
+		beaconClient:                mockBeaconNode,
+	}
+	builder, err := NewBuilder(builderArgs)
+	require.NoError(t, err)
+	builder.Start()
+	defer builder.Stop()
+	time.Sleep(2 * time.Second)
 
-// 	require.Equal(t, expectedExecutionPayload, *testRelay.submittedMsg.Bellatrix.ExecutionPayload)
+	blockResponse, err := builder.GetPayload(
+		PayloadRequestV1{
+			Slot:       testPayloadAttributes.Slot,
+			ParentHash: testPayloadAttributes.HeadHash,
+		},
+	)
+	require.NoError(t, err)
 
-// 	expectedSignature, err := utils.HexToSignature("0x8d1dc346d469b0678ee72baa559315433af0966d2d05dad0de9ce60ff5e4954d4e28a85643496df279494d105bc4a771034fefcdd83d71df5f1b81c9369942b20d6d574b544a93588f6182ba8b09585eb1cf3e1b6551ccbd9e76a4db8eb579fe")
+	expectedMessage := &builderApiV1.BidTrace{
+		Slot:                 uint64(25),
+		BlockHash:            phase0.Hash32(blockHash),
+		ParentHash:           phase0.Hash32{0x02, 0x03},
+		BuilderPubkey:        builder.builderPublicKey,
+		ProposerPubkey:       phase0.BLSPubKey{},
+		ProposerFeeRecipient: feeRecipient,
+		GasLimit:             expectedGasLimit,
+		GasUsed:              uint64(100),
+		Value:                &uint256.Int{0x0a},
+	}
+	copy(expectedMessage.BlockHash[:], blockHash[:])
+	require.NotNil(t, blockResponse.Deneb)
+	require.Equal(t, expectedMessage, blockResponse.Deneb.Message)
 
-// 	require.NoError(t, err)
-// 	require.Equal(t, expectedSignature, testRelay.submittedMsg.Bellatrix.Signature)
+	expectedExecutionPayload := &deneb.ExecutionPayload{
+		ParentHash:    phase0.Hash32{0x02, 0x03},
+		FeeRecipient:  feeRecipient,
+		StateRoot:     [32]byte(testExecutableData.ExecutionPayload.StateRoot),
+		ReceiptsRoot:  [32]byte(testExecutableData.ExecutionPayload.ReceiptsRoot),
+		LogsBloom:     [256]byte{},
+		PrevRandao:    [32]byte(testExecutableData.ExecutionPayload.Random),
+		BlockNumber:   testExecutableData.ExecutionPayload.Number,
+		GasLimit:      testExecutableData.ExecutionPayload.GasLimit,
+		GasUsed:       testExecutableData.ExecutionPayload.GasUsed,
+		Timestamp:     testExecutableData.ExecutionPayload.Timestamp,
+		ExtraData:     hexutil.MustDecode("0x0042fafc"),
+		BaseFeePerGas: uint256.NewInt(16),
+		BlockHash:     expectedMessage.BlockHash,
+		Transactions:  []bellatrix.Transaction{},
+		Withdrawals:   []*capella.Withdrawal{},
+	}
 
-// 	require.Equal(t, uint64(25), testRelay.requestedSlot)
+	require.Equal(t, expectedExecutionPayload, blockResponse.Deneb.ExecutionPayload)
 
-// 	// Clear the submitted message and check that the job will be ran again and but a new message will not be submitted since the hash is the same
-// 	testEthService.testBlockValue = big.NewInt(10)
-
-// 	testRelay.submittedMsg = nil
-// 	time.Sleep(2200 * time.Millisecond)
-// 	require.Nil(t, testRelay.submittedMsg)
-
-// 	// Change the hash, expect to get the block
-// 	testExecutableData.ExtraData = hexutil.MustDecode("0x0042fafd")
-// 	testExecutableData.BlockHash = common.HexToHash("0x6a259b9a148da3cc0bf139eaa89292fa9f7b136cfeddad17f7cb0ae33e0c3df9")
-// 	testBlock, err = engine.ExecutableDataToBlock(*testExecutableData, nil, nil)
-// 	testEthService.testBlockValue = big.NewInt(10)
-// 	require.NoError(t, err)
-// 	testEthService.testBlock = testBlock
-
-// 	time.Sleep(2200 * time.Millisecond)
-// 	require.NotNil(t, testRelay.submittedMsg)
-// }
+	expectedSignature, err := utils.HexToSignature("0xa2416ce0f5d65329c750ea9338f9b11280aa9b04180859a8a9e8082d1794b9fa17f7928bfab66ed20733d06e6f9ac2ec185ff98b91e5da9aaa6fbab8a410c9f9b76e5fde01d498ee2cfe9867949d2eead6a53e953ad910805f8dddae3ec3bbdf")
+	require.NoError(t, err)
+	require.Equal(t, expectedSignature, blockResponse.Deneb.Signature)
+}

@@ -1,33 +1,42 @@
 package builder
 
 import (
-	"net/http/httptest"
+	"testing"
+	"time"
 
-	"github.com/gorilla/mux"
+	"gotest.tools/assert"
 )
 
-type testBeaconClient struct {
-	slot uint64
-}
-
-func (b *testBeaconClient) Stop() {}
-
-func (b *testBeaconClient) SubscribeToPayloadAttributesEvents(payloadAttrC chan BuilderPayloadAttributes) {
-}
-
-func (b *testBeaconClient) Start() error { return nil }
-
 type mockBeaconNode struct {
-	srv *httptest.Server
+	payloadAttributes BuilderPayloadAttributes
 }
 
-func newMockBeaconNode() *mockBeaconNode {
-	r := mux.NewRouter()
-	srv := httptest.NewServer(r)
+func (b *mockBeaconNode) Stop() {}
 
-	mbn := &mockBeaconNode{
-		srv: srv,
+func (b *mockBeaconNode) SubscribeToPayloadAttributesEvents(payloadAttrC chan BuilderPayloadAttributes) {
+	go func() {
+		payloadAttrC <- b.payloadAttributes
+	}()
+}
+
+func (b *mockBeaconNode) Start() error { return nil }
+
+func newMockBeaconNode(payloadAttributes BuilderPayloadAttributes) *mockBeaconNode {
+	return &mockBeaconNode{
+		payloadAttributes: payloadAttributes,
 	}
+}
 
-	return mbn
+func TestMockBeaconNode(t *testing.T) {
+	mockBeaconNode := newMockBeaconNode(BuilderPayloadAttributes{Slot: 123})
+	payloadAttrC := make(chan BuilderPayloadAttributes, 1) // Use buffered channel
+
+	mockBeaconNode.SubscribeToPayloadAttributesEvents(payloadAttrC)
+
+	select {
+	case payloadAttributes := <-payloadAttrC:
+		assert.Equal(t, uint64(123), payloadAttributes.Slot)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Test timed out waiting for payload attributes")
+	}
 }
