@@ -135,6 +135,13 @@ func (payload *Payload) update(r *newPayloadResult, elapsed time.Duration) {
 	}
 	log.Debug("New payload update", "id", payload.id, "elapsed", common.PrettyDuration(elapsed))
 
+	buildBlockTimer.Update(elapsed)
+	blockProfitHistogram.Update(r.fees.Int64())
+	blockProfitGauge.Update(r.fees.Int64())
+	culmulativeProfitGauge.Inc(r.fees.Int64())
+	gasUsedGauge.Update(int64(r.block.GasUsed()))
+	transactionNumGauge.Update(int64(len(r.block.Transactions())))
+
 	// Ensure the newly provided full block has a higher transaction fee.
 	// In post-merge stage, there is no uncle reward anymore and transaction
 	// fee(apart from the mev revenue) is the only indicator for comparison.
