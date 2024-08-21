@@ -420,7 +420,7 @@ func (b *Builder) runBuildingJob(slotCtx context.Context, proposerPubkey phase0.
 		sealedAt := time.Now()
 		queueMu.Lock()
 		defer queueMu.Unlock()
-		if payload.ExecutionPayload.BlockHash != queueLastSubmittedHash && payload.BlockValue.Cmp(queueBestBlockValue) > 0 {
+		if payload.ExecutionPayload.BlockHash != queueLastSubmittedHash && payload.BlockValue.Cmp(queueBestBlockValue) >= 0 {
 			queueLastSubmittedHash = payload.ExecutionPayload.BlockHash
 			queueBestBlockValue = payload.BlockValue
 
