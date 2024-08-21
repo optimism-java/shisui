@@ -89,7 +89,7 @@ func Register(stack *node.Node, backend *eth.Ethereum, cfg *Config) error {
 		beaconClient = NewOpBeaconClient(cfg.BeaconEndpoints[0])
 	}
 
-	ethereumService := NewEthereumService(backend)
+	ethereumService := NewEthereumService(backend, cfg)
 
 	builderSk, err := bls.SecretKeyFromBytes(envBuilderSkBytes[:])
 	if err != nil {

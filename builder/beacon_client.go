@@ -18,7 +18,8 @@ type IBeaconClient interface {
 
 type NilBeaconClient struct{}
 
-func (b *NilBeaconClient) SubscribeToPayloadAttributesEvents(payloadAttrC chan BuilderPayloadAttributes) {}
+func (b *NilBeaconClient) SubscribeToPayloadAttributesEvents(payloadAttrC chan BuilderPayloadAttributes) {
+}
 
 func (b *NilBeaconClient) Start() error { return nil }
 

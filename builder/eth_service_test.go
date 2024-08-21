@@ -90,7 +90,7 @@ func TestBuildBlock(t *testing.T) {
 		Slot:                  uint64(25),
 	}
 
-	service := NewEthereumService(ethservice)
+	service := NewEthereumService(ethservice, &DefaultConfig)
 
 	executableData, err := service.BuildBlock(testPayloadAttributes)
 

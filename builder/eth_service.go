@@ -22,11 +22,13 @@ type IEthereumService interface {
 
 type EthereumService struct {
 	eth *eth.Ethereum
+	cfg *Config
 }
 
-func NewEthereumService(eth *eth.Ethereum) *EthereumService {
+func NewEthereumService(eth *eth.Ethereum, config *Config) *EthereumService {
 	return &EthereumService{
 		eth: eth,
+		cfg: config,
 	}
 }
 
@@ -56,7 +58,7 @@ func (s *EthereumService) BuildBlock(attrs *BuilderPayloadAttributes) (*engine.E
 		resCh <- payload.ResolveFull()
 	}()
 
-	timer := time.NewTimer(2 * time.Second)
+	timer := time.NewTimer(s.cfg.BlockTime)
 	defer timer.Stop()
 
 	select {
