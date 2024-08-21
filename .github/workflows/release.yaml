@@ -45,8 +45,8 @@ jobs:
       - name: Login to DockerHub
         uses: docker/login-action@v2
         with:
-          username: ${{ FLASHBOTS_DOCKERHUB_USERNAME }}
-          password: ${{ FLASHBOTS_DOCKERHUB_TOKEN }}
+          username: ${{ secrets.FLASHBOTS_DOCKERHUB_USER }}
+          password: ${{ secrets.FLASHBOTS_DOCKERHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v3
