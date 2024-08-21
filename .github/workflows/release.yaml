@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - flashbots
 
 permissions:
   contents: write
@@ -59,65 +59,19 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  build-all:
+  github-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - name: Fetch all tags
-        run: git fetch --force --tags
-      - name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: ^1.22
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: latest
-          args: release --skip=publish --config .goreleaser-build.yaml --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: op-geth-build
-          path: |
-            dist/op-geth*.tar.gz
-            dist/op-geth*.txt
+      - name: Checkout sources
+        uses: actions/checkout@v2
 
-  release:
-    needs: build-all
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - name: Fetch all tags
-        run: git fetch --force --tags
-      - name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: ^1.22
-      - name: Make directories
-        run: |
-          mkdir -p ./build
-      - name: Download binaries
-        uses: actions/download-artifact@v3
-        with:
-          name: op-geth-build
-          path: ./build
-      - name: Merge checksum file
-        run: |
-          cd ./build
-          cat ./op-geth*checksums.txt >> checksums.txt
-          rm ./op-geth*checksums.txt
-      - name: Release
-        uses: goreleaser/goreleaser-action@v3
-        with:
-          args: release --config .goreleaser-release.yaml
+      - name: Create release
+        id: create_release
+        uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: ${{ github.ref }}
+          draft: true
+          prerelease: false
