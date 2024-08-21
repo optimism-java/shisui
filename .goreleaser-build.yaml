@@ -1,0 +1,24 @@
+# https://goreleaser.com/customization/builds/
+project_name: op-geth
+builds:
+  - id: op-geth
+    env:
+      # Force build to be all Go.
+      - CGO_ENABLED=0
+    flags:
+      # Remove all file system paths from the executable.
+      - -trimpath
+    ldflags:
+      # Disables DWARF debugging information.
+      - -w
+      # Disables symbol table information.
+      - -s
+      # Sets the value of the symbol.
+      - -X github.com/flashbots/op-geth/config.Version={{.Version}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
