@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package rpc
+package builder
 
 import (
 	"fmt"
@@ -23,18 +23,9 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 )
 
-var (
-	rpcRequestGauge        = metrics.NewRegisteredGauge("rpc/requests", nil)
-	successfulRequestGauge = metrics.NewRegisteredGauge("rpc/success", nil)
-	failedRequestGauge     = metrics.NewRegisteredGauge("rpc/failure", nil)
+var serveTimeHistName = "builder/duration"
 
-	// serveTimeHistName is the prefix of the per-request serving time histograms.
-	serveTimeHistName = "rpc/duration"
-
-	rpcServingTimer = metrics.NewRegisteredTimer("rpc/duration/all", nil)
-)
-
-// updateServeTimeHistogram tracks the serving time of a remote RPC call.
+// updateServeTimeHistogram tracks the serving time of serving a call.
 func updateServeTimeHistogram(method string, success bool, elapsed time.Duration) {
 	note := "success"
 	if !success {

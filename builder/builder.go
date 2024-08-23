@@ -222,9 +222,11 @@ func (b *Builder) GetPayload(request PayloadRequestV1) (*builderSpec.VersionedSu
 }
 
 func (b *Builder) handleGetPayload(w http.ResponseWriter, req *http.Request) {
+	start := time.Now()
 	vars := mux.Vars(req)
 	slot, err := strconv.Atoi(vars["slot"])
 	if err != nil {
+		updateServeTimeHistogram("getPayload", false, time.Since(start))
 		respondError(w, http.StatusBadRequest, "incorrect slot")
 		return
 	}
@@ -238,16 +240,19 @@ func (b *Builder) handleGetPayload(w http.ResponseWriter, req *http.Request) {
 	})
 	if err != nil {
 		handleError(w, err)
+		updateServeTimeHistogram("getPayload", false, time.Since(start))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(bestSubmission); err != nil {
+		updateServeTimeHistogram("getPayload", false, time.Since(start))
 		log.Error("could not encode response", "err", err)
 		respondError(w, http.StatusInternalServerError, "could not encode response")
 		return
 	}
+	updateServeTimeHistogram("getPayload", true, time.Since(start))
 }
 
 func (b *Builder) saveBlockSubmission(opts SubmitBlockOpts) error {
