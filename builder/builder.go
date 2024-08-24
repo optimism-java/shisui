@@ -357,10 +357,11 @@ func (b *Builder) getBlockRequest(executableData *engine.ExecutionPayloadEnvelop
 }
 
 func (b *Builder) handlePayloadAttributes(attrs *BuilderPayloadAttributes) error {
-	log.Info("handling payload attribute", "slot", attrs.Slot, "hash", attrs.HeadHash)
 	if attrs == nil {
 		return nil
 	}
+
+	log.Info("handling payload attribute", "slot", attrs.Slot, "hash", attrs.HeadHash)
 
 	parentBlock := b.eth.GetBlockByHash(attrs.HeadHash)
 	if parentBlock == nil {
