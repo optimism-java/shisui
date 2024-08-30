@@ -725,6 +725,11 @@ var (
 		Value:    builder.RetryIntervalDefault.String(),
 		Category: flags.BuilderCategory,
 	}
+	CustomChainFlag = &cli.StringFlag{
+		Name:     "chain",
+		Usage:    "Path to a custom chain specification file",
+		Category: flags.EthCategory,
+	}
 
 	// RPC settings
 	IPCDisabledFlag = &cli.BoolFlag{
@@ -2135,6 +2140,15 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkId = genesis.Config.ChainID.Uint64()
 		}
 		cfg.Genesis = genesis
+
+	case ctx.IsSet(CustomChainFlag.Name):
+		genesis, _, err := initJSONChainGenesis(ctx, stack, ctx.String(CustomChainFlag.Name))
+		if err != nil {
+			Fatalf("Failed to initialize custom chain: %v", err)
+		}
+		cfg.Genesis = genesis
+		cfg.NetworkId = genesis.Config.ChainID.Uint64()
+
 	default:
 		if cfg.NetworkId == 1 {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
@@ -2520,4 +2534,39 @@ func MakeTrieDatabase(ctx *cli.Context, disk ethdb.Database, preimage bool, read
 		config.PathDB = pathdb.Defaults
 	}
 	return triedb.NewDatabase(disk, config)
+}
+
+// initJSONChainGenesis based on the init command
+func initJSONChainGenesis(ctx *cli.Context, stack *node.Node, genesisPath string) (*core.Genesis, common.Hash, error) {
+	file, err := os.Open(genesisPath)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+	defer file.Close()
+
+	genesis := new(core.Genesis)
+	if err := json.NewDecoder(file).Decode(genesis); err != nil {
+		return nil, common.Hash{}, err
+	}
+
+	var overrides core.ChainOverrides
+	// overrides.OverrideCancun = &genesis.Config.Cancun
+	// overrides.OverrideVerkle = &genesis.Config.Verkle
+
+	chaindb, err := stack.OpenDatabaseWithFreezer("chaindata", 0, 0, ctx.String(AncientFlag.Name), "", false)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+	defer chaindb.Close()
+
+	triedb := MakeTrieDatabase(ctx, chaindb, ctx.Bool(CachePreimagesFlag.Name), false, genesis.IsVerkle())
+	defer triedb.Close()
+
+	_, hash, err := core.SetupGenesisBlockWithOverride(chaindb, triedb, genesis, &overrides)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+
+	log.Info("Successfully wrote genesis state", "database", "chaindata", "hash", hash)
+	return genesis, hash, nil
 }
