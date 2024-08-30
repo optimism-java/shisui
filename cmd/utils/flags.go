@@ -1683,6 +1683,13 @@ func SetDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "holesky")
 	case ctx.IsSet(OPNetworkFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), ctx.String(OPNetworkFlag.Name))
+
+	case ctx.IsSet(CustomChainFlag.Name) && cfg.DataDir == node.DefaultDataDir():
+		genesis, err := readGenesisFromPath(ctx.String(CustomChainFlag.Name))
+		if err != nil {
+			Fatalf("Failed to read genesis file: %v", err)
+		}
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "custom-"+genesis.Config.ChainID.String())
 	}
 }
 
@@ -2536,16 +2543,24 @@ func MakeTrieDatabase(ctx *cli.Context, disk ethdb.Database, preimage bool, read
 	return triedb.NewDatabase(disk, config)
 }
 
-// initJSONChainGenesis based on the init command
-func initJSONChainGenesis(ctx *cli.Context, stack *node.Node, genesisPath string) (*core.Genesis, common.Hash, error) {
+func readGenesisFromPath(genesisPath string) (*core.Genesis, error) {
 	file, err := os.Open(genesisPath)
 	if err != nil {
-		return nil, common.Hash{}, err
+		return nil, err
 	}
 	defer file.Close()
 
 	genesis := new(core.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
+		return nil, err
+	}
+	return genesis, nil
+}
+
+// initJSONChainGenesis based on the init command
+func initJSONChainGenesis(ctx *cli.Context, stack *node.Node, genesisPath string) (*core.Genesis, common.Hash, error) {
+	genesis, err := readGenesisFromPath(genesisPath)
+	if err != nil {
 		return nil, common.Hash{}, err
 	}
 
