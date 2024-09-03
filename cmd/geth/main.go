@@ -173,6 +173,7 @@ var (
 		utils.BeaconGenesisTimeFlag,
 		utils.BeaconCheckpointFlag,
 		utils.CollectWitnessFlag,
+		utils.CustomChainFlag,
 	}, utils.NetworkFlags, utils.DatabaseFlags)
 
 	builderApiFlags = []cli.Flag{
