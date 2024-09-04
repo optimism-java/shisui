@@ -6,19 +6,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/builder/types"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/r3labs/sse"
 )
 
 type IBeaconClient interface {
-	SubscribeToPayloadAttributesEvents(payloadAttrC chan BuilderPayloadAttributes)
+	SubscribeToPayloadAttributesEvents(payloadAttrC chan types.PayloadAttributes)
 	Start() error
 	Stop()
 }
 
 type NilBeaconClient struct{}
 
-func (b *NilBeaconClient) SubscribeToPayloadAttributesEvents(payloadAttrC chan BuilderPayloadAttributes) {
+func (b *NilBeaconClient) SubscribeToPayloadAttributesEvents(payloadAttrC chan types.PayloadAttributes) {
 }
 
 func (b *NilBeaconClient) Start() error { return nil }
@@ -43,14 +44,14 @@ func NewOpBeaconClient(endpoint string) *OpBeaconClient {
 	}
 }
 
-func (opbc *OpBeaconClient) SubscribeToPayloadAttributesEvents(payloadAttrC chan BuilderPayloadAttributes) {
+func (opbc *OpBeaconClient) SubscribeToPayloadAttributesEvents(payloadAttrC chan types.PayloadAttributes) {
 	eventsURL := fmt.Sprintf("%s/events", opbc.endpoint)
 	log.Info("subscribing to payload_attributes events", "url", eventsURL)
 
 	for {
 		client := sse.NewClient(eventsURL)
 		err := client.SubscribeWithContext(opbc.ctx, "payload_attributes", func(msg *sse.Event) {
-			data := new(BuilderPayloadAttributes)
+			data := new(types.PayloadAttributes)
 			err := json.Unmarshal(msg.Data, data)
 			if err != nil {
 				log.Error("could not unmarshal payload_attributes event", "err", err)

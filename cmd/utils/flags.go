@@ -683,10 +683,10 @@ var (
 		EnvVars:  []string{"BUILDER_IGNORE_LATE_PAYLOAD_ATTRIBUTES"},
 		Category: flags.BuilderCategory,
 	}
-	BuilderSecretKey = &cli.StringFlag{
-		Name:     "builder.secret_key",
+	BuilderSigningKey = &cli.StringFlag{
+		Name:     "builder.signing_key",
 		Usage:    "Builder key used for signing blocks",
-		EnvVars:  []string{"BUILDER_SECRET_KEY"},
+		EnvVars:  []string{"BUILDER_SIGNING_KEY"},
 		Value:    "0x2fc12ae741f29701f8e30f5de6350766c020cb80768a0ff01e6838ffd2431e11",
 		Category: flags.BuilderCategory,
 	}
@@ -695,13 +695,6 @@ var (
 		Usage:    "Listening address for builder endpoint",
 		EnvVars:  []string{"BUILDER_LISTEN_ADDR"},
 		Value:    ":28545",
-		Category: flags.BuilderCategory,
-	}
-	BuilderGenesisForkVersion = &cli.StringFlag{
-		Name:     "builder.genesis_fork_version",
-		Usage:    "Gensis fork version.",
-		EnvVars:  []string{"BUILDER_GENESIS_FORK_VERSION"},
-		Value:    "0x00000000",
 		Category: flags.BuilderCategory,
 	}
 	BuilderBeaconEndpoints = &cli.StringFlag{
@@ -725,6 +718,13 @@ var (
 		Value:    builder.RetryIntervalDefault.String(),
 		Category: flags.BuilderCategory,
 	}
+	BuilderProposerSigningAddress = &cli.StringFlag{
+		Name:     "builder.proposer_signing_address",
+		Usage:    "Proposer address used for authenticating proposer messages",
+		EnvVars:  []string{"BUILDER_PROPOSER_SIGNING_ADDRESS"},
+		Category: flags.BuilderCategory,
+	}
+
 	CustomChainFlag = &cli.StringFlag{
 		Name:     "chain",
 		Usage:    "Path to a custom chain specification file",
@@ -1582,13 +1582,13 @@ func SetBuilderConfig(ctx *cli.Context, cfg *builder.Config) {
 		cfg.Enabled = ctx.Bool(BuilderEnabled.Name)
 	}
 	cfg.IgnoreLatePayloadAttributes = ctx.IsSet(BuilderIgnoreLatePayloadAttributes.Name)
-	cfg.BuilderSecretKey = ctx.String(BuilderSecretKey.Name)
+	cfg.BuilderSigningKey = ctx.String(BuilderSigningKey.Name)
 	cfg.ListenAddr = ctx.String(BuilderListenAddr.Name)
-	cfg.GenesisForkVersion = ctx.String(BuilderGenesisForkVersion.Name)
 	cfg.BeaconEndpoints = strings.Split(ctx.String(BuilderBeaconEndpoints.Name), ",")
 
 	cfg.RetryInterval = ctx.String(BuilderBlockRetryInterval.Name)
 	cfg.BlockTime = ctx.Duration(BuilderBlockTime.Name)
+	cfg.ProposerAddress = ctx.String(BuilderProposerSigningAddress.Name)
 }
 
 // SetNodeConfig applies node-related command line flags to the config.

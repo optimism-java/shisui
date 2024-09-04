@@ -1,4 +1,4 @@
-package builder
+package types
 
 import (
 	"github.com/ethereum/go-ethereum/common"
@@ -7,12 +7,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-type PayloadRequestV1 struct {
-	Slot       uint64      `json:"slot"`
-	ParentHash common.Hash `json:"parentHash"`
-}
-
-type BuilderPayloadAttributes struct {
+type PayloadAttributes struct {
 	Timestamp             hexutil.Uint64    `json:"timestamp"`
 	Random                common.Hash       `json:"prevRandao"`
 	SuggestedFeeRecipient common.Address    `json:"suggestedFeeRecipient,omitempty"`
@@ -26,7 +21,7 @@ type BuilderPayloadAttributes struct {
 	Transactions []*types.Transaction `json:"transactions"`       // Optimism addition: txs forced into the block via engine API
 }
 
-func (attrs *BuilderPayloadAttributes) Equal(other *BuilderPayloadAttributes) bool {
+func (attrs *PayloadAttributes) Equal(other *PayloadAttributes) bool {
 	if attrs.Timestamp != other.Timestamp ||
 		attrs.Random != other.Random ||
 		attrs.SuggestedFeeRecipient != other.SuggestedFeeRecipient ||

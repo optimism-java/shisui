@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
+	builderTypes "github.com/ethereum/go-ethereum/builder/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth"
@@ -14,7 +15,7 @@ import (
 )
 
 type IEthereumService interface {
-	BuildBlock(attrs *BuilderPayloadAttributes) (*engine.ExecutionPayloadEnvelope, error)
+	BuildBlock(attrs *builderTypes.PayloadAttributes) (*engine.ExecutionPayloadEnvelope, error)
 	GetBlockByHash(hash common.Hash) *types.Block
 	Config() *params.ChainConfig
 	Synced() bool
@@ -32,7 +33,7 @@ func NewEthereumService(eth *eth.Ethereum, config *Config) *EthereumService {
 	}
 }
 
-func (s *EthereumService) BuildBlock(attrs *BuilderPayloadAttributes) (*engine.ExecutionPayloadEnvelope, error) {
+func (s *EthereumService) BuildBlock(attrs *builderTypes.PayloadAttributes) (*engine.ExecutionPayloadEnvelope, error) {
 	// Send a request to generate a full block in the background.
 	// The result can be obtained via the returned channel.
 	args := &miner.BuildPayloadArgs{

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	builderTypes "github.com/ethereum/go-ethereum/builder/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
@@ -82,7 +83,7 @@ func TestBuildBlock(t *testing.T) {
 
 	parent := ethservice.BlockChain().CurrentBlock()
 
-	testPayloadAttributes := &BuilderPayloadAttributes{
+	testPayloadAttributes := &builderTypes.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(parent.Time + 1),
 		Random:                common.Hash{0x05, 0x10},
 		SuggestedFeeRecipient: common.Address{0x04, 0x10},
