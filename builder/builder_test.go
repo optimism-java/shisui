@@ -5,21 +5,15 @@ import (
 	"testing"
 	"time"
 
-	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
-	"github.com/attestantio/go-eth2-client/spec/bellatrix"
-	"github.com/attestantio/go-eth2-client/spec/capella"
-	"github.com/attestantio/go-eth2-client/spec/deneb"
-	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/ethereum/go-ethereum/beacon/engine"
+	builderTypes "github.com/ethereum/go-ethereum/builder/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/flashbots/go-boost-utils/bls"
-	"github.com/flashbots/go-boost-utils/ssz"
-	"github.com/flashbots/go-boost-utils/utils"
-	"github.com/holiman/uint256"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,7 +23,7 @@ type testEthereumService struct {
 	testBlock          *types.Block
 }
 
-func (t *testEthereumService) BuildBlock(attrs *BuilderPayloadAttributes) (*engine.ExecutionPayloadEnvelope, error) {
+func (t *testEthereumService) BuildBlock(attrs *builderTypes.PayloadAttributes) (*engine.ExecutionPayloadEnvelope, error) {
 	return t.testExecutableData, nil
 }
 
@@ -50,17 +44,13 @@ func TestGetPayloadV1(t *testing.T) {
 		validatorDesiredGasLimit = 30_000_000
 		payloadAttributeGasLimit = 0
 		parentBlockGasLimit      = 29_000_000
+		testPrivateKeyHex        = "2fc12ae741f29701f8e30f5de6350766c020cb80768a0ff01e6838ffd2431e11"
 	)
+
+	testPrivateKey, err := crypto.HexToECDSA(testPrivateKeyHex)
+	require.NoError(t, err)
+	feeRecipient := common.HexToAddress("0xabcf8e0d4e9587369b2301d0790347320302cc00")
 	expectedGasLimit := core.CalcGasLimit(parentBlockGasLimit, validatorDesiredGasLimit)
-
-	feeRecipient, err := utils.HexToAddress("0xabcf8e0d4e9587369b2301d0790347320302cc00")
-	require.NoError(t, err)
-
-	sk, err := bls.SecretKeyFromBytes(hexutil.MustDecode("0x31ee185dad1220a8c88ca5275e64cf5a5cb09cb621cb30df52c9bee8fbaaf8d7"))
-	require.NoError(t, err)
-
-	bDomain := ssz.ComputeDomain(ssz.DomainTypeAppBuilder, [4]byte{0x02, 0x0, 0x0, 0x0}, phase0.Root{})
-
 	zero := uint64(0)
 	blockHash := common.HexToHash("5fc0137650b887cdb47ae6426d5e0e368e315a2ad3f93df80a8d14f8e1ce239a")
 	testExecutableData := &engine.ExecutionPayloadEnvelope{
@@ -91,7 +81,7 @@ func TestGetPayloadV1(t *testing.T) {
 	testBlock, err := engine.ExecutableDataToBlock(*testExecutableData.ExecutionPayload, nil, nil)
 	require.NoError(t, err)
 
-	testPayloadAttributes := &BuilderPayloadAttributes{
+	testPayloadAttributes := &builderTypes.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(104),
 		Random:                common.Hash{0x05, 0x10},
 		SuggestedFeeRecipient: common.Address(feeRecipient),
@@ -111,8 +101,9 @@ func TestGetPayloadV1(t *testing.T) {
 
 	mockBeaconNode := newMockBeaconNode(*testPayloadAttributes)
 	builderArgs := BuilderArgs{
-		sk:                          sk,
-		builderSigningDomain:        bDomain,
+		builderPrivateKey:           testPrivateKey,
+		builderAddress:              crypto.PubkeyToAddress(testPrivateKey.PublicKey),
+		proposerAddress:             crypto.PubkeyToAddress(testPrivateKey.PublicKey),
 		builderRetryInterval:        200 * time.Millisecond,
 		blockTime:                   2 * time.Second,
 		eth:                         testEthService,
@@ -125,50 +116,41 @@ func TestGetPayloadV1(t *testing.T) {
 	defer builder.Stop()
 	time.Sleep(2 * time.Second)
 
+	msg := builderTypes.PayloadRequestV1{
+		Slot:       testPayloadAttributes.Slot,
+		ParentHash: testPayloadAttributes.HeadHash,
+	}
+	requestBytes, err := rlp.EncodeToBytes(&msg)
+	require.NoError(t, err)
+	hash, err := BuilderSigningHash(builder.eth.Config(), requestBytes)
+	require.NoError(t, err)
+	signature, err := crypto.Sign(hash[:], testPrivateKey)
+	require.NoError(t, err)
 	blockResponse, err := builder.GetPayload(
-		PayloadRequestV1{
-			Slot:       testPayloadAttributes.Slot,
-			ParentHash: testPayloadAttributes.HeadHash,
+		&builderTypes.BuilderPayloadRequest{
+			Message:   msg,
+			Signature: signature,
 		},
 	)
 	require.NoError(t, err)
 
-	expectedMessage := &builderApiV1.BidTrace{
+	expectedMessage := &builderTypes.BidTrace{
 		Slot:                 uint64(25),
-		BlockHash:            phase0.Hash32(blockHash),
-		ParentHash:           phase0.Hash32{0x02, 0x03},
-		BuilderPubkey:        builder.builderPublicKey,
-		ProposerPubkey:       phase0.BLSPubKey{},
+		BlockHash:            blockHash,
+		ParentHash:           common.Hash{0x02, 0x03},
+		BuilderAddress:       builderArgs.builderAddress,
+		ProposerAddress:      builderArgs.proposerAddress,
 		ProposerFeeRecipient: feeRecipient,
 		GasLimit:             expectedGasLimit,
 		GasUsed:              uint64(100),
-		Value:                &uint256.Int{0x0a},
+		Value:                big.NewInt(10),
 	}
 	copy(expectedMessage.BlockHash[:], blockHash[:])
-	require.NotNil(t, blockResponse.Deneb)
-	require.Equal(t, expectedMessage, blockResponse.Deneb.Message)
+	require.NotNil(t, blockResponse)
+	require.Equal(t, expectedMessage, blockResponse.Message)
 
-	expectedExecutionPayload := &deneb.ExecutionPayload{
-		ParentHash:    phase0.Hash32{0x02, 0x03},
-		FeeRecipient:  feeRecipient,
-		StateRoot:     [32]byte(testExecutableData.ExecutionPayload.StateRoot),
-		ReceiptsRoot:  [32]byte(testExecutableData.ExecutionPayload.ReceiptsRoot),
-		LogsBloom:     [256]byte{},
-		PrevRandao:    [32]byte(testExecutableData.ExecutionPayload.Random),
-		BlockNumber:   testExecutableData.ExecutionPayload.Number,
-		GasLimit:      testExecutableData.ExecutionPayload.GasLimit,
-		GasUsed:       testExecutableData.ExecutionPayload.GasUsed,
-		Timestamp:     testExecutableData.ExecutionPayload.Timestamp,
-		ExtraData:     hexutil.MustDecode("0x0042fafc"),
-		BaseFeePerGas: uint256.NewInt(16),
-		BlockHash:     expectedMessage.BlockHash,
-		Transactions:  []bellatrix.Transaction{},
-		Withdrawals:   []*capella.Withdrawal{},
-	}
-
-	require.Equal(t, expectedExecutionPayload, blockResponse.Deneb.ExecutionPayload)
-
-	expectedSignature, err := utils.HexToSignature("0xa2416ce0f5d65329c750ea9338f9b11280aa9b04180859a8a9e8082d1794b9fa17f7928bfab66ed20733d06e6f9ac2ec185ff98b91e5da9aaa6fbab8a410c9f9b76e5fde01d498ee2cfe9867949d2eead6a53e953ad910805f8dddae3ec3bbdf")
+	require.Equal(t, testExecutableData.ExecutionPayload, blockResponse.ExecutionPayload)
+	expectedSignature, err := hexutil.Decode("0x72ce97e705ecbe69effb11ae63791fd45f058e5766be52ad6704516d5a984ebf00a22d8661201e21968fbf285700d6ab93accfe54acf2dfc4c52edc190a54fdb00")
 	require.NoError(t, err)
-	require.Equal(t, expectedSignature, blockResponse.Deneb.Signature)
+	require.Equal(t, expectedSignature, blockResponse.Signature)
 }

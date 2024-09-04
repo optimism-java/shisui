@@ -1,25 +1,23 @@
 package builder
 
 import (
-	"errors"
+	"crypto/ecdsa"
 	"fmt"
 	"net/http"
 	"time"
 
-	builderSpec "github.com/attestantio/go-builder-client/spec"
-	"github.com/attestantio/go-eth2-client/spec/phase0"
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	builderTypes "github.com/ethereum/go-ethereum/builder/types"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/flashbots/go-boost-utils/bls"
-	"github.com/flashbots/go-boost-utils/ssz"
 	"github.com/gorilla/mux"
 )
 
 const (
-	_PathGetPayload = "/eth/v1/builder/payload/{slot:[0-9]+}/{parent_hash:0x[a-fA-F0-9]+}"
+	_PathGetPayload = "/eth/v1/builder/payload"
 )
 
 type Service struct {
@@ -46,7 +44,7 @@ func (s *Service) Stop() error {
 	return nil
 }
 
-func (s *Service) GetPayloadV1(request PayloadRequestV1) (*builderSpec.VersionedSubmitBlockRequest, error) {
+func (s *Service) GetPayloadV1(request *builderTypes.BuilderPayloadRequest) (*builderTypes.VersionedBuilderPayloadResponse, error) {
 	return s.builder.GetPayload(request)
 }
 
@@ -54,7 +52,7 @@ func NewService(listenAddr string, builder IBuilder) *Service {
 	var srv *http.Server
 
 	router := mux.NewRouter()
-	router.HandleFunc(_PathGetPayload, builder.handleGetPayload).Methods(http.MethodGet)
+	router.HandleFunc(_PathGetPayload, builder.handleGetPayload).Methods(http.MethodPost)
 
 	srv = &http.Server{
 		Addr:    listenAddr,
@@ -68,20 +66,6 @@ func NewService(listenAddr string, builder IBuilder) *Service {
 }
 
 func Register(stack *node.Node, backend *eth.Ethereum, cfg *Config) error {
-	envBuilderSkBytes, err := hexutil.Decode(cfg.BuilderSecretKey)
-	if err != nil {
-		return errors.New("incorrect builder API secret key provided")
-	}
-
-	genesisForkVersionBytes, err := hexutil.Decode(cfg.GenesisForkVersion)
-	if err != nil {
-		return fmt.Errorf("invalid genesisForkVersion: %w", err)
-	}
-
-	var genesisForkVersion [4]byte
-	copy(genesisForkVersion[:], genesisForkVersionBytes[:4])
-	builderSigningDomain := ssz.ComputeDomain(ssz.DomainTypeAppBuilder, genesisForkVersion, phase0.Root{})
-
 	var beaconClient IBeaconClient
 	if len(cfg.BeaconEndpoints) == 0 {
 		beaconClient = &NilBeaconClient{}
@@ -90,11 +74,6 @@ func Register(stack *node.Node, backend *eth.Ethereum, cfg *Config) error {
 	}
 
 	ethereumService := NewEthereumService(backend, cfg)
-
-	builderSk, err := bls.SecretKeyFromBytes(envBuilderSkBytes[:])
-	if err != nil {
-		return errors.New("incorrect builder API secret key provided")
-	}
 
 	var builderRetryInterval time.Duration
 	if cfg.RetryInterval != "" {
@@ -107,10 +86,29 @@ func Register(stack *node.Node, backend *eth.Ethereum, cfg *Config) error {
 		builderRetryInterval = RetryIntervalDefault
 	}
 
+	builderPrivateKey, err := crypto.HexToECDSA(cfg.BuilderSigningKey)
+	if err != nil {
+		return fmt.Errorf("invalid builder private key: %w", err)
+	}
+	builderPublicKey := builderPrivateKey.Public()
+	builderPublicKeyECDSA, ok := builderPublicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return fmt.Errorf("publicKey could not be converted to ECDSA")
+	}
+	builderAddress := crypto.PubkeyToAddress(*builderPublicKeyECDSA)
+
+	var proposerAddress common.Address
+	if common.IsHexAddress(cfg.ProposerAddress) {
+		proposerAddress = common.HexToAddress(cfg.ProposerAddress)
+	} else {
+		log.Warn("proposer signing address is invalid or not set, proposer signature verification will be skipped")
+	}
+
 	builderArgs := BuilderArgs{
-		sk:                          builderSk,
+		builderPrivateKey:           builderPrivateKey,
+		builderAddress:              builderAddress,
+		proposerAddress:             proposerAddress,
 		eth:                         ethereumService,
-		builderSigningDomain:        builderSigningDomain,
 		builderRetryInterval:        builderRetryInterval,
 		ignoreLatePayloadAttributes: cfg.IgnoreLatePayloadAttributes,
 		beaconClient:                beaconClient,

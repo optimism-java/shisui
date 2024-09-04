@@ -21,7 +21,7 @@ sequenceDiagram
     OPB-->>BB: PayloadAttributes
     
     Note right of BB: timespan for building blocks
-    OPS->> BB: /eth/v1/builder/payload/{slot}/{parent_hash}
+    OPS->> BB: POST /eth/v1/builder/payload
     BB-->>OPS: BuilderPayload
     OPS->> EES: engine_getPayload
     OPS-->>OPS: SimulatePayload
@@ -43,5 +43,7 @@ To enable the builder:
 
   * `--builder` Enable the Builder module
   * `--builder.beacon_endpoints` list of op-node SSE event stream endpoints to subscribe from
+  * `--builder.signing_key` private key to sign requested block payloads
+  * `--builder.proposer_signing_address` signing address used to authenticate the proposer
 
 Run `geth --help` for the full list of builder configurations.

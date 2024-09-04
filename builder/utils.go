@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/http"
 	"time"
+
+	builderTypes "github.com/ethereum/go-ethereum/builder/types"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 type httpErrorResp struct {
@@ -63,4 +69,23 @@ func runRetryLoop(ctx context.Context, interval time.Duration, retry func()) {
 			retry()
 		}
 	}
+}
+
+func SigningHash(domain [32]byte, chainID *big.Int, payloadBytes []byte) (common.Hash, error) {
+	var msgInput [32 + 32 + 32]byte
+	// domain: first 32 bytes
+	copy(msgInput[:32], domain[:])
+	// chain_id: second 32 bytes
+	if chainID.BitLen() > 256 {
+		return common.Hash{}, errors.New("chain_id is too large")
+	}
+	chainID.FillBytes(msgInput[32:64])
+	// payload_hash: third 32 bytes, hash of encoded payload
+	copy(msgInput[64:], crypto.Keccak256(payloadBytes))
+
+	return crypto.Keccak256Hash(msgInput[:]), nil
+}
+
+func BuilderSigningHash(cfg *params.ChainConfig, payloadBytes []byte) (common.Hash, error) {
+	return SigningHash(builderTypes.SigningDomainBuilderV1, cfg.ChainID, payloadBytes)
 }
