@@ -647,7 +647,6 @@ func (c *Codec) decryptMessage(input, nonce, headerData, readKey []byte) (Packet
 // The packetLen here is the length remaining after the static header.
 func (h *StaticHeader) checkValid(packetLen int, protocolID [6]byte) error {
 	if h.ProtocolID != protocolID {
-		fmt.Println("chenkaiprotocolID", string(h.ProtocolID[:]), string(protocolID[:]))
 		return errInvalidHeader
 	}
 	if h.Version < minVersion {
