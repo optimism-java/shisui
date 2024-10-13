@@ -304,8 +304,10 @@ func (t *UDPv5) TalkRequest(n *enode.Node, protocol string, request []byte) ([]b
 	defer t.callDone(resp)
 	select {
 	case respMsg := <-resp.ch:
+		fmt.Println("aaaaaaaaaaaaaaaaaaaaa")
 		return respMsg.(*v5wire.TalkResponse).Message, nil
 	case err := <-resp.err:
+		fmt.Println("bbbbbbbbbbbbbbbbbbbb")
 		return nil, err
 	}
 }
