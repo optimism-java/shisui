@@ -596,20 +596,7 @@ func (t *UDPv5) dispatch() {
 			t.sendNextCall(c.id)
 
 		case r := <-t.sendCh:
-			c := &callV5{id: r.destID, addr: r.destAddr}
-			c.packet = r.msg
-			c.reqid = make([]byte, 8)
-			c.ch = make(chan v5wire.Packet, 1)
-			c.err = make(chan error, 1)
-			// Assign request ID.
-			crand.Read(c.reqid)
-			c.packet.SetRequestID(c.reqid)
-
-			newNonce, _ := t.send(c.id, c.addr, c.packet, nil)
-
-			c.nonce = newNonce
-			t.activeCallByAuth[newNonce] = c
-			t.startResponseTimeout(c)
+			t.send(r.destID, r.destAddr, r.msg, nil)
 
 		case p := <-t.packetInCh:
 			t.handlePacket(p.Data, p.Addr)

@@ -61,9 +61,9 @@ const (
 
 	defaultUTPConnectTimeout = 15 * time.Second
 
-	defaultUTPWriteTimeout = 60 * time.Second
+	defaultUTPWriteTimeout = 25 * time.Second
 
-	defaultUTPReadTimeout = 60 * time.Second
+	defaultUTPReadTimeout = 25 * time.Second
 
 	// These are the concurrent offers per Portal wire protocol that is running.
 	// Using the `offerQueue` allows for limiting the amount of offers send and
