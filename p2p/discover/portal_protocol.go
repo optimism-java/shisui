@@ -257,8 +257,21 @@ func (p *PortalProtocol) Start() error {
 		go p.offerWorker()
 	}
 
-	// wait for the routing table to be initialized
-	<-p.table.initDone
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		<-p.DiscV5.tab.initDone
+		wg.Done()
+	}()
+
+	go func() {
+		<-p.table.initDone
+		wg.Done()
+	}()
+
+	// wait for both initialization processes to complete
+	wg.Wait()
 	return nil
 }
 
