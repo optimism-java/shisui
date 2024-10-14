@@ -257,21 +257,9 @@ func (p *PortalProtocol) Start() error {
 		go p.offerWorker()
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		<-p.DiscV5.tab.initDone
-		wg.Done()
-	}()
-
-	go func() {
-		<-p.table.initDone
-		wg.Done()
-	}()
-
 	// wait for both initialization processes to complete
-	wg.Wait()
+	<-p.DiscV5.tab.initDone
+	<-p.table.initDone
 	return nil
 }
 
