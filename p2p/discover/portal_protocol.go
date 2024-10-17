@@ -168,7 +168,7 @@ func DefaultPortalProtocolConfig() *PortalProtocolConfig {
 type PortalProtocol struct {
 	table         *Table
 	cachedIdsLock sync.Mutex
-	cachedIds     map[string]enode.ID
+	cachedIds     map[string]*enode.Node
 
 	protocolId   string
 	protocolName string
@@ -210,7 +210,7 @@ func NewPortalProtocol(config *PortalProtocolConfig, protocolId portalwire.Proto
 	closeCtx, cancelCloseCtx := context.WithCancel(context.Background())
 
 	protocol := &PortalProtocol{
-		cachedIds:      make(map[string]enode.ID),
+		cachedIds:      make(map[string]*enode.Node),
 		protocolId:     string(protocolId),
 		protocolName:   protocolId.Name(),
 		ListenAddr:     config.ListenAddr,
@@ -323,10 +323,10 @@ func (p *PortalProtocol) setupUDPListening() error {
 
 			p.cachedIdsLock.Lock()
 			defer p.cachedIdsLock.Unlock()
-			if id, ok := p.cachedIds[addr.String()]; ok {
+			if n, ok := p.cachedIds[addr.String()]; ok {
 				//_, err := p.DiscV5.TalkRequestToID(id, addr, string(portalwire.UTPNetwork), buf)
 				req := &v5wire.TalkRequest{Protocol: string(portalwire.Utp), Message: buf}
-				p.DiscV5.sendFromAnotherThread(id, netip.AddrPortFrom(netutil.IPToAddr(addr.IP), uint16(addr.Port)), req)
+				p.DiscV5.sendFromAnotherThreadWithNode(n, netip.AddrPortFrom(netutil.IPToAddr(addr.IP), uint16(addr.Port)), req)
 
 				return len(buf), err
 			} else {
@@ -381,21 +381,24 @@ func (p *PortalProtocol) setupDiscV5AndTable() error {
 	return nil
 }
 
-func (p *PortalProtocol) putCacheNodeId(node *enode.Node) {
+func (p *PortalProtocol) cacheNode(node *enode.Node) {
 	p.cachedIdsLock.Lock()
 	defer p.cachedIdsLock.Unlock()
 	addr := &net.UDPAddr{IP: node.IP(), Port: node.UDP()}
 	if _, ok := p.cachedIds[addr.String()]; !ok {
-		p.cachedIds[addr.String()] = node.ID()
+		p.cachedIds[addr.String()] = node
 	}
 }
 
-func (p *PortalProtocol) putCacheId(id enode.ID, addr *net.UDPAddr) {
-	p.cachedIdsLock.Lock()
-	defer p.cachedIdsLock.Unlock()
-	if _, ok := p.cachedIds[addr.String()]; !ok {
-		p.cachedIds[addr.String()] = id
-	}
+func (p *PortalProtocol) cacheNodeById(id enode.ID, addr *net.UDPAddr) {
+	go func() {
+		if _, ok := p.cachedIds[addr.String()]; !ok {
+			n := p.ResolveNodeId(id)
+			if n != nil {
+				p.cacheNode(n)
+			}
+		}
+	}()
 }
 
 func (p *PortalProtocol) ping(node *enode.Node) (uint64, error) {
@@ -544,7 +547,7 @@ func (p *PortalProtocol) processOffer(target *enode.Node, resp []byte, request *
 	}
 
 	p.Log.Info("will process Offer", "id", target.ID(), "ip", target.IP().To4().String(), "port", target.UDP())
-	p.putCacheNodeId(target)
+	p.cacheNode(target)
 
 	accept := &portalwire.Accept{}
 	err = accept.UnmarshalSSZ(resp[1:])
@@ -666,7 +669,7 @@ func (p *PortalProtocol) processContent(target *enode.Node, resp []byte) (byte, 
 	}
 
 	p.Log.Info("will process content", "id", target.ID(), "ip", target.IP().To4().String(), "port", target.UDP())
-	p.putCacheNodeId(target)
+	p.cacheNode(target)
 
 	switch resp[1] {
 	case portalwire.ContentRawSelector:
@@ -841,21 +844,14 @@ func (p *PortalProtocol) processPong(target *enode.Node, resp []byte) (*portalwi
 }
 
 func (p *PortalProtocol) handleUtpTalkRequest(id enode.ID, addr *net.UDPAddr, msg []byte) []byte {
-	if n := p.DiscV5.getNode(id); n != nil {
-		p.table.addInboundNode(n)
-	}
-
-	p.putCacheId(id, addr)
+	p.cacheNodeById(id, addr)
 	p.Log.Trace("receive utp data", "addr", addr, "msg-length", len(msg))
 	p.packetRouter.ReceiveMessage(msg, addr)
 	return []byte("")
 }
 
 func (p *PortalProtocol) handleTalkRequest(id enode.ID, addr *net.UDPAddr, msg []byte) []byte {
-	if n := p.DiscV5.getNode(id); n != nil {
-		p.table.addInboundNode(n)
-	}
-	p.putCacheId(id, addr)
+	p.cacheNodeById(id, addr)
 
 	msgCode := msg[0]
 
@@ -1020,7 +1016,7 @@ func (p *PortalProtocol) handleFindContent(id enode.ID, addr *net.UDPAddr, reque
 		return nil, err
 	}
 
-	p.putCacheId(id, addr)
+	p.cacheNodeById(id, addr)
 
 	if errors.Is(err, ContentNotFound) {
 		closestNodes := p.findNodesCloseToContent(contentId, portalFindnodesResultLimit)
@@ -1192,7 +1188,7 @@ func (p *PortalProtocol) handleOffer(id enode.ID, addr *net.UDPAddr, request *po
 		}
 	}
 
-	p.putCacheId(id, addr)
+	p.cacheNodeById(id, addr)
 
 	idBuffer := make([]byte, 2)
 	if contentKeyBitlist.Count() != 0 {
