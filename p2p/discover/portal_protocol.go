@@ -257,7 +257,8 @@ func (p *PortalProtocol) Start() error {
 		go p.offerWorker()
 	}
 
-	// wait for the routing table to be initialized
+	// wait for both initialization processes to complete
+	<-p.DiscV5.tab.initDone
 	<-p.table.initDone
 	return nil
 }
@@ -900,7 +901,7 @@ func (p *PortalProtocol) handleTalkRequest(id enode.ID, addr *net.UDPAddr, msg [
 			return nil
 		}
 
-		p.Log.Trace("<< FIND_NODES/"+p.protocolName, "protocol", p.protocolName, "source", id, "findContentRequest", findContentRequest)
+		p.Log.Trace("<< FIND_CONTENT/"+p.protocolName, "protocol", p.protocolName, "source", id, "findContentRequest", findContentRequest)
 		resp, err := p.handleFindContent(id, addr, findContentRequest)
 		if err != nil {
 			p.Log.Error("failed to handle find content request", "err", err)
