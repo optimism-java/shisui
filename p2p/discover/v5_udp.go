@@ -62,15 +62,17 @@ type codecV5 interface {
 // UDPv5 is the implementation of protocol version 5.
 type UDPv5 struct {
 	// static fields
-	conn         UDPConn
-	tab          *Table
-	netrestrict  *netutil.Netlist
-	priv         *ecdsa.PrivateKey
-	localNode    *enode.LocalNode
-	db           *enode.DB
-	log          log.Logger
-	clock        mclock.Clock
-	validSchemes enr.IdentityScheme
+	conn           UDPConn
+	tab            *Table
+	cachedIds      map[enode.ID]*enode.Node
+	cachedAddrNode map[string]*enode.Node
+	netrestrict    *netutil.Netlist
+	priv           *ecdsa.PrivateKey
+	localNode      *enode.LocalNode
+	db             *enode.DB
+	log            log.Logger
+	clock          mclock.Clock
+	validSchemes   enr.IdentityScheme
 
 	// misc buffers used during message handling
 	logcontext []interface{}
@@ -102,6 +104,7 @@ type UDPv5 struct {
 
 type sendRequest struct {
 	destID   enode.ID
+	destNode *enode.Node
 	destAddr netip.AddrPort
 	msg      v5wire.Packet
 }
@@ -150,14 +153,16 @@ func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 	cfg = cfg.withDefaults()
 	t := &UDPv5{
 		// static fields
-		conn:         newMeteredConn(conn),
-		localNode:    ln,
-		db:           ln.Database(),
-		netrestrict:  cfg.NetRestrict,
-		priv:         cfg.PrivateKey,
-		log:          cfg.Log,
-		validSchemes: cfg.ValidSchemes,
-		clock:        cfg.Clock,
+		conn:           newMeteredConn(conn),
+		cachedAddrNode: make(map[string]*enode.Node),
+		cachedIds:      make(map[enode.ID]*enode.Node),
+		localNode:      ln,
+		db:             ln.Database(),
+		netrestrict:    cfg.NetRestrict,
+		priv:           cfg.PrivateKey,
+		log:            cfg.Log,
+		validSchemes:   cfg.ValidSchemes,
+		clock:          cfg.Clock,
 		// channels into dispatch
 		packetInCh:    make(chan ReadPacket, 1),
 		readNextCh:    make(chan struct{}, 1),
@@ -596,7 +601,24 @@ func (t *UDPv5) dispatch() {
 			t.sendNextCall(c.id)
 
 		case r := <-t.sendCh:
-			t.send(r.destID, r.destAddr, r.msg, nil)
+			c := &callV5{id: r.destID, addr: r.destAddr}
+			c.node = r.destNode
+			c.packet = r.msg
+			c.reqid = make([]byte, 8)
+			c.ch = make(chan v5wire.Packet, 1)
+			c.err = make(chan error, 1)
+			// Assign request ID.
+			if tq, ok := r.msg.(*v5wire.TalkRequest); ok {
+				if len(tq.ReqID) == 0 {
+					crand.Read(c.reqid)
+					c.packet.SetRequestID(c.reqid)
+				}
+			}
+			nonce, _ := t.send(c.id, c.addr, c.packet, nil)
+			c.nonce = nonce
+			t.activeCallByAuth[nonce] = c
+			t.startResponseTimeout(c)
+			//t.send(r.destID, r.destAddr, r.msg, nil)
 
 		case p := <-t.packetInCh:
 			t.handlePacket(p.Data, p.Addr)
@@ -681,7 +703,14 @@ func (t *UDPv5) sendResponse(toID enode.ID, toAddr netip.AddrPort, packet v5wire
 
 func (t *UDPv5) sendFromAnotherThread(toID enode.ID, toAddr netip.AddrPort, packet v5wire.Packet) {
 	select {
-	case t.sendCh <- sendRequest{toID, toAddr, packet}:
+	case t.sendCh <- sendRequest{toID, nil, toAddr, packet}:
+	case <-t.closeCtx.Done():
+	}
+}
+
+func (t *UDPv5) sendFromAnotherThreadWithNode(node *enode.Node, toAddr netip.AddrPort, packet v5wire.Packet) {
+	select {
+	case t.sendCh <- sendRequest{node.ID(), node, toAddr, packet}:
 	case <-t.closeCtx.Done():
 	}
 }
@@ -693,10 +722,15 @@ func (t *UDPv5) send(toID enode.ID, toAddr netip.AddrPort, packet v5wire.Packet,
 	t.logcontext = packet.AppendLogInfo(t.logcontext)
 
 	enc, nonce, err := t.codec.Encode(toID, addr, packet, c)
+	t.logcontext = append(t.logcontext, "nonce", fmt.Sprintf("%x", nonce[:]))
 	if err != nil {
 		t.logcontext = append(t.logcontext, "err", err)
 		t.log.Warn(">> "+packet.Name(), t.logcontext...)
 		return nonce, err
+	}
+	if c != nil && c.Node != nil {
+		t.cachedIds[toID] = c.Node
+		t.cachedAddrNode[toAddr.String()] = c.Node
 	}
 
 	_, err = t.conn.WriteToUDPAddrPort(enc, toAddr)
@@ -759,6 +793,8 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
 	if fromNode != nil {
 		// Handshake succeeded, add to table.
 		t.tab.addInboundNode(fromNode)
+		t.cachedIds[fromID] = fromNode
+		t.cachedAddrNode[fromAddr.String()] = fromNode
 	}
 	if packet.Kind() != v5wire.WhoareyouPacket {
 		// WHOAREYOU logged separately to report errors.
@@ -846,7 +882,7 @@ var (
 func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr netip.AddrPort) {
 	c, err := t.matchWithCall(fromID, p.Nonce)
 	if err != nil {
-		t.log.Debug("Invalid "+p.Name(), "addr", fromAddr, "err", err)
+		t.log.Debug("Invalid "+p.Name(), "addr", fromAddr, "nonce", fmt.Sprintf("%x", p.Nonce[:]), "err", err)
 		return
 	}
 
@@ -857,7 +893,7 @@ func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr n
 		return
 	}
 	// Resend the call that was answered by WHOAREYOU.
-	t.log.Trace("<< "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
+	t.log.Trace("<< "+p.Name(), "id", c.node.ID(), "addr", fromAddr, "nonce", fmt.Sprintf("%x", p.Nonce[:]))
 	c.handshakeCount++
 	c.challenge = p
 	p.Node = c.node
