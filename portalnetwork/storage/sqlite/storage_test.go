@@ -1,4 +1,4 @@
-package history
+package sqlite
 
 import (
 	"fmt"
@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/portalnetwork/storage"
 	contentStorage "github.com/ethereum/go-ethereum/portalnetwork/storage"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -32,7 +31,7 @@ func newContentStorage(storageCapacityInMB uint64, nodeId enode.ID, nodeDataDir 
 	if err != nil {
 		return nil, err
 	}
-	hs, err := NewHistoryStorage(storage.PortalStorageConfig{
+	hs, err := NewHistoryStorage(contentStorage.PortalStorageConfig{
 		DB:                db,
 		StorageCapacityMB: storageCapacityInMB,
 		NodeId:            nodeId,
