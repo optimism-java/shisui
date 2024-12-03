@@ -1,4 +1,4 @@
-package history
+package sqlite
 
 import (
 	"bytes"

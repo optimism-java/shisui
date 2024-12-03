@@ -152,6 +152,9 @@ func NewPeppleStorage(config PeppleStorageConfig) (storage.ContentStorage, error
 		size := binary.BigEndian.Uint64(val)
 		// init stage, no need to use lock
 		cs.size.Store(size)
+		if size > cs.storageCapacityInBytes {
+			cs.prune()
+		}
 	}
 
 	iter, err := cs.db.NewIter(nil)
@@ -232,6 +235,10 @@ func (c *ContentStorage) Radius() *uint256.Int {
 	return val
 }
 
+func (c *ContentStorage) Close() error {
+	return c.db.Close()
+}
+
 func (c *ContentStorage) prune() error {
 	expectSize := uint64(float64(c.storageCapacityInBytes) * contentDeletionFraction)
 	var curentSize uint64 = 0
@@ -270,6 +277,11 @@ func (c *ContentStorage) prune() error {
 	if err != nil {
 		return err
 	}
+	go func() {
+		start := uint256.NewInt(0).Bytes32()
+		end := storage.MaxDistance.Bytes32()
+		c.db.Compact(start[:], end[:], true)
+	}()
 	return nil
 }
 
