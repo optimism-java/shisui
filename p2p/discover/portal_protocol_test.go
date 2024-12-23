@@ -493,11 +493,11 @@ func TestTraceContentLookup(t *testing.T) {
 
 	// check response
 	node3Response := res.Trace.Responses[node3Id]
-	assert.Equal(t, node3Response.RespondedWith, []string{node2Id})
+	assert.Equal(t, []string{node2Id}, node3Response.RespondedWith)
 
 	node2Response := res.Trace.Responses[node2Id]
-	assert.Equal(t, node2Response.RespondedWith, []string{node1Id})
+	assert.Equal(t, []string{node1Id}, node2Response.RespondedWith)
 
 	node1Response := res.Trace.Responses[node1Id]
-	assert.Equal(t, node1Response.RespondedWith, ([]string)(nil))
+	assert.Nil(t, node1Response.RespondedWith)
 }
