@@ -34,7 +34,7 @@ make shisui-image
 After building `shisui`, you can start the client by running
 
 ```shell
-# supported options are list below
+# supported options are listed below
 ./build/bin/shisui
 ```
 
@@ -43,7 +43,7 @@ Alternatively, you can run the docker image by running
 ```shell
 docker run -d -p 8545:8545 -p 9009:9009/udp -e SHISUI_NAT=stun ghcr.io/optimism-java/shisui:latest
 
-# if you know your exiIp, replace by -e SHISUI_NAT=extip:${your ip}
+# if you know your extIp, replace by -e SHISUI_NAT=extip:${your ip}
 ```
 
 You can use the script below to check if the node has started correctly.
@@ -75,7 +75,7 @@ curl -X POST http://127.0.0.1:8545 \
     * `stun`    uses stun server to find extip
 * `--udp.addr` protocol UDP server listening port(default: `9009`)
 * `--loglevel` loglevel of portal network, `1` to `5`, from `error` to `trace`(default: `1`)
-* `--private.key` private key of p2p node, hex format without `0x` prifix
+* `--private.key` private key of p2p node, hex format without `0x` prefix
 * `--bootnodes` bootnode of p2p network with ENR format, use `none` to config empty bootnodes
 * `--networks` portal sub networks: history, beacon, state
 
@@ -83,7 +83,7 @@ all the options above can be set with envs.
 
 the env is prefixed with `SHISUI` and change the `.` to `_`.
 
-eg `--rpc.add` can be replaced with env `SHISUI_RPC_ADDR`
+eg `--rpc.addr` can be replaced with env `SHISUI_RPC_ADDR`
 
 ### Hardware Requirements
 
