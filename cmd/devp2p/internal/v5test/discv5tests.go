@@ -52,7 +52,7 @@ func (s *Suite) AllTests() []utesting.Test {
 		{Name: "Ping", Fn: s.TestPing},
 		{Name: "PingLargeRequestID", Fn: s.TestPingLargeRequestID},
 		{Name: "PingMultiIP", Fn: s.TestPingMultiIP},
-		{Name: "HandshakeResend", Fn: s.TestHandshakeResend},
+		{Name: "PingHandshakeInterrupted", Fn: s.TestPingHandshakeInterrupted},
 		{Name: "TalkRequest", Fn: s.TestTalkRequest},
 		{Name: "FindnodeZeroDistance", Fn: s.TestFindnodeZeroDistance},
 		{Name: "FindnodeResults", Fn: s.TestFindnodeResults},
@@ -158,20 +158,22 @@ the attempt from a different IP.`)
 	}
 }
 
-// TestHandshakeResend starts a handshake, but doesn't finish it and sends a second ordinary message
-// packet instead of a handshake message packet. The remote node should repeat the previous WHOAREYOU
-// challenge for the first PING.
-func (s *Suite) TestHandshakeResend(t *utesting.T) {
+// TestPingHandshakeInterrupted starts a handshake, but doesn't finish it and sends a second ordinary message
+// packet instead of a handshake message packet. The remote node should respond with
+// another WHOAREYOU challenge for the second packet.
+func (s *Suite) TestPingHandshakeInterrupted(t *utesting.T) {
+	t.Log(`TestPingHandshakeInterrupted starts a handshake, but doesn't finish it and sends a second ordinary message
+packet instead of a handshake message packet. The remote node should respond with
+another WHOAREYOU challenge for the second packet.`)
+
 	conn, l1 := s.listen1(t)
 	defer conn.close()
 
 	// First PING triggers challenge.
 	ping := &v5wire.Ping{ReqID: conn.nextReqID()}
 	conn.write(l1, ping, nil)
-	var challenge1 *v5wire.Whoareyou
 	switch resp := conn.read(l1).(type) {
 	case *v5wire.Whoareyou:
-		challenge1 = resp
 		t.Logf("got WHOAREYOU for PING")
 	default:
 		t.Fatal("expected WHOAREYOU, got", resp)
@@ -179,16 +181,9 @@ func (s *Suite) TestHandshakeResend(t *utesting.T) {
 
 	// Send second PING.
 	ping2 := &v5wire.Ping{ReqID: conn.nextReqID()}
-	conn.write(l1, ping2, nil)
-	switch resp := conn.read(l1).(type) {
-	case *v5wire.Whoareyou:
-		if resp.Nonce != challenge1.Nonce {
-			t.Fatalf("wrong nonce %x in WHOAREYOU (want %x)", resp.Nonce[:], challenge1.Nonce[:])
-		}
-		if !bytes.Equal(resp.ChallengeData, challenge1.ChallengeData) {
-			t.Fatalf("wrong ChallengeData in resent WHOAREYOU (want %x)", resp.ChallengeData, challenge1.ChallengeData)
-		}
-		resp.Node = conn.remote
+	switch resp := conn.reqresp(l1, ping2).(type) {
+	case *v5wire.Pong:
+		checkPong(t, resp, ping2, l1)
 	default:
 		t.Fatal("expected WHOAREYOU, got", resp)
 	}
