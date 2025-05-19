@@ -191,15 +191,8 @@ func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoar
 	case packet.Kind() == WhoareyouPacket:
 		// just send the WHOAREYOU packet raw again, rather than the re-encoded challenge data
 		w := packet.(*Whoareyou)
-		if len(w.ChallengeData) > 0 {
-			// This WHOAREYOU packet was encoded before, so it's a resend.
-			// The unmasked packet content is stored in w.ChallengeData.
-			// Just apply the masking again to finish encoding.
-			c.buf.Reset()
-			c.buf.Write(w.ChallengeData)
-			copy(head.IV[:], w.ChallengeData)
-			enc := applyMasking(id, head.IV, c.buf.Bytes())
-			return enc, w.Nonce, nil
+		if len(w.Encoded) > 0 {
+			return w.Encoded, w.Nonce, nil
 		}
 		head, err = c.encodeWhoareyou(id, packet.(*Whoareyou))
 	case challenge != nil:
@@ -234,6 +227,7 @@ func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoar
 		if err != nil {
 			return nil, Nonce{}, err
 		}
+		challenge.Encoded = bytes.Clone(enc)
 		c.sc.storeSentHandshake(id, addr, challenge)
 		return enc, head.Nonce, err
 	}
@@ -251,9 +245,13 @@ func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoar
 
 // EncodeRaw encodes a packet with the given header.
 func (c *Codec) EncodeRaw(id enode.ID, head Header, msgdata []byte) ([]byte, error) {
-	// header
 	c.writeHeaders(&head)
-	applyMasking(id, head.IV, c.buf.Bytes())
+
+	// Apply masking.
+	masked := c.buf.Bytes()[sizeofMaskingIV:]
+	mask := head.mask(id)
+	mask.XORKeyStream(masked[:], masked[:])
+
 	// Write message data.
 	c.buf.Write(msgdata)
 	return c.buf.Bytes(), nil
@@ -465,7 +463,7 @@ func (c *Codec) Decode(inputData []byte, addr string) (src enode.ID, n *enode.No
 	// Unmask the static header.
 	var head Header
 	copy(head.IV[:], input[:sizeofMaskingIV])
-	mask := createMask(c.localnode.ID(), head.IV)
+	mask := head.mask(c.localnode.ID())
 	staticHeader := input[sizeofMaskingIV:sizeofStaticPacketData]
 	mask.XORKeyStream(staticHeader, staticHeader)
 
@@ -680,20 +678,13 @@ func (h *StaticHeader) checkValid(packetLen int, protocolID [6]byte) error {
 	return nil
 }
 
-// createMask returns a cipher for 'masking' / 'unmasking' packet headers.
-func createMask(destID enode.ID, iv [16]byte) cipher.Stream {
+// mask returns a cipher for 'masking' / 'unmasking' packet headers.
+func (h *Header) mask(destID enode.ID) cipher.Stream {
 	block, err := aes.NewCipher(destID[:16])
 	if err != nil {
 		panic("can't create cipher")
 	}
-	return cipher.NewCTR(block, iv[:])
-}
-
-func applyMasking(destID enode.ID, iv [16]byte, packet []byte) []byte {
-	masked := packet[sizeofMaskingIV:]
-	mask := createMask(destID, iv)
-	mask.XORKeyStream(masked[:], masked[:])
-	return packet
+	return cipher.NewCTR(block, h.IV[:])
 }
 
 func bytesCopy(r *bytes.Buffer) []byte {
