@@ -93,6 +93,7 @@ type UDPv5 struct {
 
 	// channels into dispatch
 	packetInCh    chan ReadPacket
+	readNextCh    chan struct{}
 	callCh        chan *callV5
 	callDoneCh    chan *callV5
 	respTimeoutCh chan *callTimeout
@@ -189,6 +190,7 @@ func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 		respTimeout:  cfg.V5RespTimeout,
 		// channels into dispatch
 		packetInCh:    make(chan ReadPacket, 1024),
+		readNextCh:    make(chan struct{}, 1),
 		callCh:        make(chan *callV5),
 		callDoneCh:    make(chan *callV5),
 		sendCh:        make(chan sendRequest),
@@ -627,6 +629,7 @@ func (t *UDPv5) dispatch() {
 			t.handlePacket(p.Data, p.Addr)
 
 		case <-t.closeCtx.Done():
+			close(t.readNextCh)
 			close(t.writeCh)
 			for id, queue := range t.callQueue {
 				for _, c := range queue {
