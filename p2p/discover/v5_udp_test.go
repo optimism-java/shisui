@@ -772,10 +772,10 @@ type testCodecFrame struct {
 }
 
 func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error) {
-	if wp, ok := p.(*v5wire.Whoareyou); ok && len(wp.ChallengeData) > 0 {
-		// To match the behavior of v5wire.Codec, we return the cached encoding of
-		// WHOAREYOU challenges.
-		return wp.ChallengeData, wp.Nonce, nil
+	// To match the behavior of v5wire.Codec, we return the cached encoding of
+	// WHOAREYOU challenges.
+	if wp, ok := p.(*v5wire.Whoareyou); ok && len(wp.Encoded) > 0 {
+		return wp.Encoded, wp.Nonce, nil
 	}
 
 	c.ctr++
@@ -790,7 +790,7 @@ func (c *testCodec) Encode(toID enode.ID, addr string, p v5wire.Packet, _ *v5wir
 	// Store recently sent challenges.
 	if w, ok := p.(*v5wire.Whoareyou); ok {
 		w.Nonce = authTag
-		w.ChallengeData = frame
+		w.Encoded = frame
 		if c.sentChallenges == nil {
 			c.sentChallenges = make(map[enode.ID]*v5wire.Whoareyou)
 		}
@@ -827,7 +827,6 @@ func (c *testCodec) decodeFrame(input []byte) (frame testCodecFrame, p v5wire.Pa
 	case v5wire.WhoareyouPacket:
 		dec := new(v5wire.Whoareyou)
 		err = rlp.DecodeBytes(frame.Packet, &dec)
-		dec.ChallengeData = bytes.Clone(input)
 		p = dec
 	default:
 		p, err = v5wire.DecodeMessage(frame.Ptype, frame.Packet)
@@ -878,7 +877,9 @@ func (test *udpV5Test) packetInFrom(key *ecdsa.PrivateKey, addr netip.AddrPort, 
 	if err != nil {
 		test.t.Errorf("%s encode error: %v", packet.Name(), err)
 	}
-	test.udp.dispatchReadPacket(addr, enc)
+	if test.udp.dispatchReadPacket(addr, enc) {
+		<-test.udp.readNextCh // unblock UDPv5.dispatch
+	}
 }
 
 // getNode ensures the test knows about a node at the given endpoint.
