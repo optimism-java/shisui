@@ -36,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
+	bufferpool "github.com/libp2p/go-buffer-pool"
 )
 
 const (
@@ -186,14 +187,14 @@ func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 		clock:        cfg.Clock,
 		respTimeout:  cfg.V5RespTimeout,
 		// channels into dispatch
-		packetInCh:    make(chan ReadPacket, 64),
+		packetInCh:    make(chan ReadPacket, 1024),
 		callCh:        make(chan *callV5),
 		callDoneCh:    make(chan *callV5),
 		sendCh:        make(chan sendRequest),
 		sendNoRespCh:  make(chan *sendNoRespRequest),
 		respTimeoutCh: make(chan *callTimeout),
 		unhandled:     cfg.Unhandled,
-		writeCh:       make(chan pendingWrite, 32), // Buffered channel for outgoing packets
+		writeCh:       make(chan pendingWrite, 1024), // Buffered channel for outgoing packets
 		// state of dispatch
 		codec:            v5wire.NewCodec(ln, cfg.PrivateKey, cfg.Clock, cfg.V5ProtocolID),
 		activeCallByNode: make(map[enode.ID]*callV5),
@@ -812,7 +813,7 @@ func (t *UDPv5) writeLoop() {
 func (t *UDPv5) readLoop() {
 	defer t.wg.Done()
 
-	buf := make([]byte, maxPacketSize)
+	buf := bufferpool.Get(maxPacketSize)
 	for {
 		nbytes, from, err := t.conn.ReadFromUDPAddrPort(buf)
 		if netutil.IsTemporaryError(err) {
