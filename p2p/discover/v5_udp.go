@@ -178,7 +178,7 @@ func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 		clock:        cfg.Clock,
 		respTimeout:  cfg.V5RespTimeout,
 		// channels into dispatch
-		packetInCh:    make(chan ReadPacket, 1),
+		packetInCh:    make(chan ReadPacket, 16),
 		callCh:        make(chan *callV5),
 		callDoneCh:    make(chan *callV5),
 		sendCh:        make(chan sendRequest),
