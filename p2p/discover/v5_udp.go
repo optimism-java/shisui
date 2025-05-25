@@ -30,7 +30,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/discover/v5wire"
@@ -92,7 +91,6 @@ type UDPv5 struct {
 
 	// channels into dispatch
 	packetInCh    chan ReadPacket
-	readNextCh    chan struct{}
 	callCh        chan *callV5
 	callDoneCh    chan *callV5
 	respTimeoutCh chan *callTimeout
@@ -180,8 +178,7 @@ func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 		clock:        cfg.Clock,
 		respTimeout:  cfg.V5RespTimeout,
 		// channels into dispatch
-		packetInCh:    make(chan ReadPacket, 1),
-		readNextCh:    make(chan struct{}, 1),
+		packetInCh:    make(chan ReadPacket, 4),
 		callCh:        make(chan *callV5),
 		callDoneCh:    make(chan *callV5),
 		sendCh:        make(chan sendRequest),
@@ -584,9 +581,6 @@ func (t *UDPv5) callDone(c *callV5) {
 func (t *UDPv5) dispatch() {
 	defer t.wg.Done()
 
-	// Arm first read.
-	t.readNextCh <- struct{}{}
-
 	for {
 		select {
 		case c := <-t.callCh:
@@ -620,11 +614,8 @@ func (t *UDPv5) dispatch() {
 
 		case p := <-t.packetInCh:
 			t.handlePacket(p.Data, p.Addr)
-			// Arm next read.
-			t.readNextCh <- struct{}{}
 
 		case <-t.closeCtx.Done():
-			close(t.readNextCh)
 			for id, queue := range t.callQueue {
 				for _, c := range queue {
 					c.err <- errClosed
@@ -764,7 +755,7 @@ func (t *UDPv5) send(toID enode.ID, toAddr netip.AddrPort, packet v5wire.Packet,
 		t.log.Warn(">> "+packet.Name(), t.logcontext...)
 		return nonce, err
 	}
-	t.logcontext = append(t.logcontext, "rawpacket", hexutil.Encode(enc))
+
 	_, err = t.conn.WriteToUDPAddrPort(enc, toAddr)
 	t.log.Trace(">> "+packet.Name(), t.logcontext...)
 	return nonce, err
@@ -775,7 +766,7 @@ func (t *UDPv5) readLoop() {
 	defer t.wg.Done()
 
 	buf := make([]byte, maxPacketSize)
-	for range t.readNextCh {
+	for {
 		nbytes, from, err := t.conn.ReadFromUDPAddrPort(buf)
 		if netutil.IsTemporaryError(err) {
 			// Ignore temporary read errors.
@@ -788,7 +779,9 @@ func (t *UDPv5) readLoop() {
 			}
 			return
 		}
-		t.dispatchReadPacket(from, buf[:nbytes])
+		content := make([]byte, nbytes)
+		copy(content, buf[:nbytes])
+		t.dispatchReadPacket(from, content)
 	}
 }
 
@@ -809,8 +802,8 @@ func (t *UDPv5) dispatchReadPacket(from netip.AddrPort, content []byte) bool {
 // handlePacket decodes and processes an incoming packet from the network.
 func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
 	addr := fromAddr.String()
-	t.log.Trace("<< "+addr, "rawPacket", hexutil.Encode(rawpacket))
 	fromID, fromNode, packet, err := t.codec.Decode(rawpacket, addr)
+
 	if err != nil {
 		if t.unhandled != nil && v5wire.IsInvalidHeader(err) {
 			// The packet seems unrelated to discv5, send it to the next protocol.
