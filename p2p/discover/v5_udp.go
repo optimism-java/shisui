@@ -323,6 +323,21 @@ func (t *UDPv5) TalkRequest(n *enode.Node, protocol string, request []byte) ([]b
 	}
 }
 
+// TalkRequest sends a talk request to a node and waits for a response but will return when ctx timeout.
+func (t *UDPv5) TalkRequestWithContext(ctx context.Context, n *enode.Node, protocol string, request []byte) ([]byte, error) {
+	req := &v5wire.TalkRequest{Protocol: protocol, Message: request}
+	resp := t.callToNode(n, v5wire.TalkResponseMsg, req)
+	defer t.callDone(resp)
+	select {
+	case respMsg := <-resp.ch:
+		return respMsg.(*v5wire.TalkResponse).Message, nil
+	case err := <-resp.err:
+		return nil, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // TalkRequestToID sends a talk request to a node and waits for a response.
 func (t *UDPv5) TalkRequestToID(id enode.ID, addr netip.AddrPort, protocol string, request []byte) ([]byte, error) {
 	req := &v5wire.TalkRequest{Protocol: protocol, Message: request}
@@ -606,13 +621,14 @@ func (t *UDPv5) dispatch() {
 
 		case c := <-t.callDoneCh:
 			active := t.activeCallByNode[c.id]
-			if active != c {
-				panic("BUG: callDone for inactive call")
+			if active == c {
+				t.sendNextCall(c.id)
 			}
-			c.timeout.Stop()
+			if c.timeout != nil {
+				c.timeout.Stop()
+			}
 			delete(t.activeCallByAuth, c.nonce)
 			delete(t.activeCallByNode, c.id)
-			t.sendNextCall(c.id)
 
 		case r := <-t.sendCh:
 			t.send(r.destID, r.destAddr, r.msg, nil)
